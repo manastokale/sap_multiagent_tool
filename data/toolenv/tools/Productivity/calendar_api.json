@@ -1,0 +1,38 @@
+{
+  "tool_name": "calendar_api",
+  "tool_description": "Find and manage calendar events.",
+  "api_list": [
+    {
+      "name": "search_events",
+      "description": "Search calendar events.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "date", "type": "STRING", "description": "Calendar date"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"results": [{"id": "string", "name": "string"}]}
+    },
+    {
+      "name": "create_event",
+      "description": "Create a calendar event.",
+      "method": "POST",
+      "required_parameters": [
+        {"name": "date", "type": "STRING", "description": "Event date"},
+        {"name": "time", "type": "STRING", "description": "Start time"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"event_id": "string", "status": "string"}
+    },
+    {
+      "name": "update_event",
+      "description": "Update an existing event.",
+      "method": "PATCH",
+      "required_parameters": [
+        {"name": "event_id", "type": "STRING", "description": "Event ID"},
+        {"name": "time", "type": "STRING", "description": "Updated start time"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"id": "string", "status": "string"}
+    }
+  ]
+}

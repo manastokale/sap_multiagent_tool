@@ -1,0 +1,1539 @@
+{
+  "source": {
+    "dataset": "output/conversations_seed4210.jsonl",
+    "artifacts_dir": "output/artifacts"
+  },
+  "conversations": [],
+  "liveSamples": [],
+  "runA": [],
+  "runB": [],
+  "diversity": {},
+  "artifacts": {
+    "registryStats": {
+      "total_tools": 8,
+      "total_endpoints": 21,
+      "total_categories": 4,
+      "categories": {
+        "Commerce": 5,
+        "Food": 5,
+        "Productivity": 6,
+        "Travel": 5
+      },
+      "endpoints_with_response_schema": 21,
+      "avg_params_per_endpoint": 1.95,
+      "parse_warnings": []
+    },
+    "graphStats": {
+      "num_nodes": 21,
+      "num_edges": 90,
+      "edge_type_counts": {
+        "io_chain": 15,
+        "same_category": 53,
+        "same_tool": 20,
+        "complementary": 2
+      },
+      "num_connected_components": 4,
+      "largest_component_size": 6,
+      "avg_degree": 8.57
+    },
+    "endpoints": [
+      {
+        "tool_name": "payment_api",
+        "endpoint_name": "create_payment",
+        "endpoint_id": "payment_api/create_payment",
+        "description": "Create payment for an order.",
+        "method": "POST",
+        "category": "Commerce",
+        "parameters": [
+          {
+            "name": "order_id",
+            "type": "string",
+            "description": "Order ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "description": "Currency code",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "payment_id": "string",
+          "status": "string"
+        }
+      },
+      {
+        "tool_name": "payment_api",
+        "endpoint_name": "get_payment_status",
+        "endpoint_id": "payment_api/get_payment_status",
+        "description": "Get payment status.",
+        "method": "GET",
+        "category": "Commerce",
+        "parameters": [
+          {
+            "name": "payment_id",
+            "type": "string",
+            "description": "Payment ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "id": "string",
+          "status": "string"
+        }
+      },
+      {
+        "tool_name": "product_api",
+        "endpoint_name": "search_products",
+        "endpoint_id": "product_api/search_products",
+        "description": "Search products by query.",
+        "method": "GET",
+        "category": "Commerce",
+        "parameters": [
+          {
+            "name": "query",
+            "type": "string",
+            "description": "Search query",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "max_price",
+            "type": "number",
+            "description": "Maximum price",
+            "required": false,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "results": [
+            {
+              "id": "string",
+              "name": "string",
+              "price": "number"
+            }
+          ]
+        }
+      },
+      {
+        "tool_name": "product_api",
+        "endpoint_name": "get_product_details",
+        "endpoint_id": "product_api/get_product_details",
+        "description": "Get details for a product returned by search.",
+        "method": "GET",
+        "category": "Commerce",
+        "parameters": [
+          {
+            "name": "product_id",
+            "type": "string",
+            "description": "Product ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "id": "string",
+          "name": "string",
+          "details": "string"
+        }
+      },
+      {
+        "tool_name": "product_api",
+        "endpoint_name": "create_order",
+        "endpoint_id": "product_api/create_order",
+        "description": "Create an order for a product.",
+        "method": "POST",
+        "category": "Commerce",
+        "parameters": [
+          {
+            "name": "product_id",
+            "type": "string",
+            "description": "Product ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "quantity",
+            "type": "integer",
+            "description": "Quantity",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "order_id": "string",
+          "status": "string"
+        }
+      },
+      {
+        "tool_name": "event_api",
+        "endpoint_name": "search_events",
+        "endpoint_id": "event_api/search_events",
+        "description": "Search events by city and date.",
+        "method": "GET",
+        "category": "Food",
+        "parameters": [
+          {
+            "name": "city",
+            "type": "string",
+            "description": "City name",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "date",
+            "type": "string",
+            "description": "Event date",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "results": [
+            {
+              "id": "string",
+              "name": "string"
+            }
+          ]
+        }
+      },
+      {
+        "tool_name": "event_api",
+        "endpoint_name": "book_ticket",
+        "endpoint_id": "event_api/book_ticket",
+        "description": "Book a ticket for an event.",
+        "method": "POST",
+        "category": "Food",
+        "parameters": [
+          {
+            "name": "event_id",
+            "type": "string",
+            "description": "Event ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "quantity",
+            "type": "integer",
+            "description": "Ticket count",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "confirmation_id": "string",
+          "status": "string"
+        }
+      },
+      {
+        "tool_name": "restaurant_api",
+        "endpoint_name": "search_restaurants",
+        "endpoint_id": "restaurant_api/search_restaurants",
+        "description": "Search restaurants in a city.",
+        "method": "GET",
+        "category": "Food",
+        "parameters": [
+          {
+            "name": "city",
+            "type": "string",
+            "description": "City name",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "party_size",
+            "type": "integer",
+            "description": "Number of diners",
+            "required": false,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "results": [
+            {
+              "id": "string",
+              "name": "string",
+              "rating": "number"
+            }
+          ]
+        }
+      },
+      {
+        "tool_name": "restaurant_api",
+        "endpoint_name": "get_restaurant_details",
+        "endpoint_id": "restaurant_api/get_restaurant_details",
+        "description": "Get details for a restaurant returned by search.",
+        "method": "GET",
+        "category": "Food",
+        "parameters": [
+          {
+            "name": "restaurant_id",
+            "type": "string",
+            "description": "Restaurant ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "id": "string",
+          "name": "string",
+          "details": "string"
+        }
+      },
+      {
+        "tool_name": "restaurant_api",
+        "endpoint_name": "reserve_table",
+        "endpoint_id": "restaurant_api/reserve_table",
+        "description": "Reserve a table at a restaurant.",
+        "method": "POST",
+        "category": "Food",
+        "parameters": [
+          {
+            "name": "restaurant_id",
+            "type": "string",
+            "description": "Restaurant ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "date",
+            "type": "string",
+            "description": "Reservation date",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "time",
+            "type": "string",
+            "description": "Reservation time",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "party_size",
+            "type": "integer",
+            "description": "Number of diners",
+            "required": false,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "confirmation_id": "string",
+          "status": "string"
+        }
+      },
+      {
+        "tool_name": "calendar_api",
+        "endpoint_name": "search_events",
+        "endpoint_id": "calendar_api/search_events",
+        "description": "Search calendar events.",
+        "method": "GET",
+        "category": "Productivity",
+        "parameters": [
+          {
+            "name": "date",
+            "type": "string",
+            "description": "Calendar date",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "results": [
+            {
+              "id": "string",
+              "name": "string"
+            }
+          ]
+        }
+      },
+      {
+        "tool_name": "calendar_api",
+        "endpoint_name": "create_event",
+        "endpoint_id": "calendar_api/create_event",
+        "description": "Create a calendar event.",
+        "method": "POST",
+        "category": "Productivity",
+        "parameters": [
+          {
+            "name": "date",
+            "type": "string",
+            "description": "Event date",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "time",
+            "type": "string",
+            "description": "Start time",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "event_id": "string",
+          "status": "string"
+        }
+      },
+      {
+        "tool_name": "calendar_api",
+        "endpoint_name": "update_event",
+        "endpoint_id": "calendar_api/update_event",
+        "description": "Update an existing event.",
+        "method": "PATCH",
+        "category": "Productivity",
+        "parameters": [
+          {
+            "name": "event_id",
+            "type": "string",
+            "description": "Event ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "time",
+            "type": "string",
+            "description": "Updated start time",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "id": "string",
+          "status": "string"
+        }
+      },
+      {
+        "tool_name": "contact_api",
+        "endpoint_name": "search_contacts",
+        "endpoint_id": "contact_api/search_contacts",
+        "description": "Search contacts by name or company.",
+        "method": "GET",
+        "category": "Productivity",
+        "parameters": [
+          {
+            "name": "query",
+            "type": "string",
+            "description": "Contact search query",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "results": [
+            {
+              "id": "string",
+              "name": "string"
+            }
+          ]
+        }
+      },
+      {
+        "tool_name": "contact_api",
+        "endpoint_name": "get_contact_details",
+        "endpoint_id": "contact_api/get_contact_details",
+        "description": "Get details for a contact.",
+        "method": "GET",
+        "category": "Productivity",
+        "parameters": [
+          {
+            "name": "contact_id",
+            "type": "string",
+            "description": "Contact ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "id": "string",
+          "name": "string",
+          "email": "string"
+        }
+      },
+      {
+        "tool_name": "contact_api",
+        "endpoint_name": "create_contact",
+        "endpoint_id": "contact_api/create_contact",
+        "description": "Create a new contact.",
+        "method": "POST",
+        "category": "Productivity",
+        "parameters": [
+          {
+            "name": "name",
+            "type": "string",
+            "description": "Contact name",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "email",
+            "type": "string",
+            "description": "Email address",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "contact_id": "string",
+          "status": "string"
+        }
+      },
+      {
+        "tool_name": "flight_api",
+        "endpoint_name": "search_flights",
+        "endpoint_id": "flight_api/search_flights",
+        "description": "Search for flights between cities.",
+        "method": "GET",
+        "category": "Travel",
+        "parameters": [
+          {
+            "name": "origin",
+            "type": "string",
+            "description": "Origin city",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "destination",
+            "type": "string",
+            "description": "Destination city",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "date",
+            "type": "string",
+            "description": "Travel date",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "max_price",
+            "type": "number",
+            "description": "Maximum ticket price",
+            "required": false,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "results": [
+            {
+              "id": "string",
+              "name": "string",
+              "price": "number"
+            }
+          ]
+        }
+      },
+      {
+        "tool_name": "flight_api",
+        "endpoint_name": "book_flight",
+        "endpoint_id": "flight_api/book_flight",
+        "description": "Book a selected flight.",
+        "method": "POST",
+        "category": "Travel",
+        "parameters": [
+          {
+            "name": "flight_id",
+            "type": "string",
+            "description": "Flight ID from search",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "confirmation_id": "string",
+          "status": "string"
+        }
+      },
+      {
+        "tool_name": "hotel_api",
+        "endpoint_name": "search_hotels",
+        "endpoint_id": "hotel_api/search_hotels",
+        "description": "Search for hotels in a city.",
+        "method": "GET",
+        "category": "Travel",
+        "parameters": [
+          {
+            "name": "city",
+            "type": "string",
+            "description": "Destination city",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "max_price",
+            "type": "number",
+            "description": "Maximum nightly price",
+            "required": false,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "description": "Currency code",
+            "required": false,
+            "default": "USD",
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "results": [
+            {
+              "id": "string",
+              "name": "string",
+              "price": "number"
+            }
+          ]
+        }
+      },
+      {
+        "tool_name": "hotel_api",
+        "endpoint_name": "get_hotel_details",
+        "endpoint_id": "hotel_api/get_hotel_details",
+        "description": "Get detailed information for a hotel returned by search.",
+        "method": "GET",
+        "category": "Travel",
+        "parameters": [
+          {
+            "name": "hotel_id",
+            "type": "string",
+            "description": "Hotel ID from search",
+            "required": true,
+            "default": null,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "id": "string",
+          "name": "string",
+          "details": "string"
+        }
+      },
+      {
+        "tool_name": "hotel_api",
+        "endpoint_name": "book_hotel",
+        "endpoint_id": "hotel_api/book_hotel",
+        "description": "Book a hotel room.",
+        "method": "POST",
+        "category": "Travel",
+        "parameters": [
+          {
+            "name": "hotel_id",
+            "type": "string",
+            "description": "Hotel ID",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "check_in",
+            "type": "string",
+            "description": "Check-in date",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "check_out",
+            "type": "string",
+            "description": "Check-out date",
+            "required": true,
+            "default": null,
+            "enum": null
+          },
+          {
+            "name": "guests",
+            "type": "integer",
+            "description": "Number of guests",
+            "required": false,
+            "default": 1,
+            "enum": null
+          }
+        ],
+        "response_schema": {
+          "confirmation_id": "string",
+          "status": "string"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "source": "payment_api/create_payment",
+        "target": "payment_api/get_payment_status",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "payment_api/create_payment",
+        "target": "product_api/search_products",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "payment_api/create_payment",
+        "target": "product_api/get_product_details",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "payment_api/create_payment",
+        "target": "product_api/create_order",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "payment_api/get_payment_status",
+        "target": "payment_api/create_payment",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "payment_api/get_payment_status",
+        "target": "product_api/search_products",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "payment_api/get_payment_status",
+        "target": "product_api/get_product_details",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "payment_api/get_payment_status",
+        "target": "product_api/create_order",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "product_api/search_products",
+        "target": "product_api/get_product_details",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "product_api/search_products",
+        "target": "product_api/create_order",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "product_api/search_products",
+        "target": "payment_api/create_payment",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "product_api/search_products",
+        "target": "payment_api/get_payment_status",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "product_api/get_product_details",
+        "target": "product_api/search_products",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "product_api/get_product_details",
+        "target": "product_api/create_order",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "product_api/get_product_details",
+        "target": "payment_api/create_payment",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "product_api/get_product_details",
+        "target": "payment_api/get_payment_status",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "product_api/create_order",
+        "target": "product_api/search_products",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "product_api/create_order",
+        "target": "product_api/get_product_details",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "product_api/create_order",
+        "target": "payment_api/create_payment",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "io_chain",
+          "same_category"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "product_api/create_order",
+        "target": "payment_api/get_payment_status",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "event_api/search_events",
+        "target": "event_api/book_ticket",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "event_api/search_events",
+        "target": "restaurant_api/search_restaurants",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "event_api/search_events",
+        "target": "restaurant_api/get_restaurant_details",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "event_api/search_events",
+        "target": "restaurant_api/reserve_table",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "event_api/book_ticket",
+        "target": "event_api/search_events",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "event_api/book_ticket",
+        "target": "restaurant_api/search_restaurants",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "event_api/book_ticket",
+        "target": "restaurant_api/get_restaurant_details",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "event_api/book_ticket",
+        "target": "restaurant_api/reserve_table",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "restaurant_api/search_restaurants",
+        "target": "restaurant_api/get_restaurant_details",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "restaurant_api/search_restaurants",
+        "target": "restaurant_api/reserve_table",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "restaurant_api/search_restaurants",
+        "target": "event_api/search_events",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "restaurant_api/search_restaurants",
+        "target": "event_api/book_ticket",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "restaurant_api/get_restaurant_details",
+        "target": "restaurant_api/search_restaurants",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "restaurant_api/get_restaurant_details",
+        "target": "restaurant_api/reserve_table",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "restaurant_api/get_restaurant_details",
+        "target": "event_api/search_events",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "restaurant_api/get_restaurant_details",
+        "target": "event_api/book_ticket",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "restaurant_api/reserve_table",
+        "target": "restaurant_api/search_restaurants",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "restaurant_api/reserve_table",
+        "target": "restaurant_api/get_restaurant_details",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "restaurant_api/reserve_table",
+        "target": "event_api/search_events",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "restaurant_api/reserve_table",
+        "target": "event_api/book_ticket",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "calendar_api/search_events",
+        "target": "calendar_api/create_event",
+        "edge_type": "complementary",
+        "edge_types": [
+          "complementary",
+          "same_tool"
+        ],
+        "weight": 0.8
+      },
+      {
+        "source": "calendar_api/search_events",
+        "target": "calendar_api/update_event",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "calendar_api/search_events",
+        "target": "contact_api/search_contacts",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "calendar_api/search_events",
+        "target": "contact_api/get_contact_details",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "calendar_api/search_events",
+        "target": "contact_api/create_contact",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "calendar_api/create_event",
+        "target": "calendar_api/search_events",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "calendar_api/create_event",
+        "target": "calendar_api/update_event",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "calendar_api/create_event",
+        "target": "contact_api/search_contacts",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "calendar_api/create_event",
+        "target": "contact_api/get_contact_details",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "calendar_api/create_event",
+        "target": "contact_api/create_contact",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "calendar_api/update_event",
+        "target": "calendar_api/search_events",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "calendar_api/update_event",
+        "target": "calendar_api/create_event",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "calendar_api/update_event",
+        "target": "contact_api/search_contacts",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "calendar_api/update_event",
+        "target": "contact_api/get_contact_details",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "calendar_api/update_event",
+        "target": "contact_api/create_contact",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "contact_api/search_contacts",
+        "target": "contact_api/get_contact_details",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "contact_api/search_contacts",
+        "target": "contact_api/create_contact",
+        "edge_type": "complementary",
+        "edge_types": [
+          "complementary",
+          "same_tool"
+        ],
+        "weight": 0.8
+      },
+      {
+        "source": "contact_api/search_contacts",
+        "target": "calendar_api/search_events",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "contact_api/search_contacts",
+        "target": "calendar_api/create_event",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "contact_api/search_contacts",
+        "target": "calendar_api/update_event",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "contact_api/get_contact_details",
+        "target": "contact_api/search_contacts",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "contact_api/get_contact_details",
+        "target": "contact_api/create_contact",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "contact_api/get_contact_details",
+        "target": "calendar_api/search_events",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "contact_api/get_contact_details",
+        "target": "calendar_api/create_event",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "contact_api/get_contact_details",
+        "target": "calendar_api/update_event",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "contact_api/create_contact",
+        "target": "contact_api/search_contacts",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "contact_api/create_contact",
+        "target": "contact_api/get_contact_details",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "contact_api/create_contact",
+        "target": "calendar_api/search_events",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "contact_api/create_contact",
+        "target": "calendar_api/create_event",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "contact_api/create_contact",
+        "target": "calendar_api/update_event",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "flight_api/search_flights",
+        "target": "flight_api/book_flight",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "flight_api/search_flights",
+        "target": "hotel_api/search_hotels",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "flight_api/search_flights",
+        "target": "hotel_api/get_hotel_details",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "flight_api/search_flights",
+        "target": "hotel_api/book_hotel",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "flight_api/book_flight",
+        "target": "flight_api/search_flights",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "flight_api/book_flight",
+        "target": "hotel_api/search_hotels",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "flight_api/book_flight",
+        "target": "hotel_api/get_hotel_details",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "flight_api/book_flight",
+        "target": "hotel_api/book_hotel",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "hotel_api/search_hotels",
+        "target": "hotel_api/get_hotel_details",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "hotel_api/search_hotels",
+        "target": "hotel_api/book_hotel",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "hotel_api/search_hotels",
+        "target": "flight_api/search_flights",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "hotel_api/search_hotels",
+        "target": "flight_api/book_flight",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "hotel_api/get_hotel_details",
+        "target": "hotel_api/search_hotels",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "hotel_api/get_hotel_details",
+        "target": "hotel_api/book_hotel",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "hotel_api/get_hotel_details",
+        "target": "flight_api/search_flights",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "hotel_api/get_hotel_details",
+        "target": "flight_api/book_flight",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "hotel_api/book_hotel",
+        "target": "hotel_api/search_hotels",
+        "edge_type": "same_tool",
+        "edge_types": [
+          "same_tool"
+        ],
+        "weight": 0.3
+      },
+      {
+        "source": "hotel_api/book_hotel",
+        "target": "hotel_api/get_hotel_details",
+        "edge_type": "io_chain",
+        "edge_types": [
+          "complementary",
+          "io_chain",
+          "same_tool"
+        ],
+        "weight": 1.0
+      },
+      {
+        "source": "hotel_api/book_hotel",
+        "target": "flight_api/search_flights",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      },
+      {
+        "source": "hotel_api/book_hotel",
+        "target": "flight_api/book_flight",
+        "edge_type": "same_category",
+        "edge_types": [
+          "same_category"
+        ],
+        "weight": 0.5
+      }
+    ]
+  }
+}

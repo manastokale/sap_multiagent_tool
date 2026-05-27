@@ -1,0 +1,39 @@
+{
+  "tool_name": "product_api",
+  "tool_description": "Search products and create customer orders.",
+  "api_list": [
+    {
+      "name": "search_products",
+      "description": "Search products by query.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "query", "type": "STRING", "description": "Search query"}
+      ],
+      "optional_parameters": [
+        {"name": "max_price", "type": "NUMBER", "description": "Maximum price"}
+      ],
+      "response_schema": {"results": [{"id": "string", "name": "string", "price": "number"}]}
+    },
+    {
+      "name": "get_product_details",
+      "description": "Get details for a product returned by search.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "product_id", "type": "STRING", "description": "Product ID"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"id": "string", "name": "string", "details": "string"}
+    },
+    {
+      "name": "create_order",
+      "description": "Create an order for a product.",
+      "method": "POST",
+      "required_parameters": [
+        {"name": "product_id", "type": "STRING", "description": "Product ID"},
+        {"name": "quantity", "type": "INTEGER", "description": "Quantity"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"order_id": "string", "status": "string"}
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "tool_name": "payment_api",
+  "tool_description": "Create and inspect payments for orders.",
+  "api_list": [
+    {
+      "name": "create_payment",
+      "description": "Create payment for an order.",
+      "method": "POST",
+      "required_parameters": [
+        {"name": "order_id", "type": "STRING", "description": "Order ID"},
+        {"name": "currency", "type": "STRING", "description": "Currency code"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"payment_id": "string", "status": "string"}
+    },
+    {
+      "name": "get_payment_status",
+      "description": "Get payment status.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "payment_id", "type": "STRING", "description": "Payment ID"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"id": "string", "status": "string"}
+    }
+  ]
+}

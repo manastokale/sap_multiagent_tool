@@ -1,0 +1,28 @@
+{
+  "tool_name": "event_api",
+  "tool_description": "Search venues and book event tickets.",
+  "api_list": [
+    {
+      "name": "search_events",
+      "description": "Search events by city and date.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "city", "type": "STRING", "description": "City name"},
+        {"name": "date", "type": "STRING", "description": "Event date"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"results": [{"id": "string", "name": "string"}]}
+    },
+    {
+      "name": "book_ticket",
+      "description": "Book a ticket for an event.",
+      "method": "POST",
+      "required_parameters": [
+        {"name": "event_id", "type": "STRING", "description": "Event ID"},
+        {"name": "quantity", "type": "INTEGER", "description": "Ticket count"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"confirmation_id": "string", "status": "string"}
+    }
+  ]
+}

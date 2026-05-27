@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/
+
+# Data
+# The small fixture corpus in data/toolenv/tools is part of the project.
+# Put large downloaded ToolBench dumps outside the repo or point TOOLGEN_TOOLENV_DIR
+# at their location.
+.toolbench_tmp/
+.toolbench_clone/
+
+# Output (generated)
+output/
+
+# Frontend dashboard
+dashboard/node_modules/
+dashboard/dist/
+dashboard/tsconfig.tsbuildinfo
+
+# Local runtime logs / pid files
+.run/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

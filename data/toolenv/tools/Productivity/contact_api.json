@@ -1,0 +1,37 @@
+{
+  "tool_name": "contact_api",
+  "tool_description": "Search and create business contacts.",
+  "api_list": [
+    {
+      "name": "search_contacts",
+      "description": "Search contacts by name or company.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "query", "type": "STRING", "description": "Contact search query"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"results": [{"id": "string", "name": "string"}]}
+    },
+    {
+      "name": "get_contact_details",
+      "description": "Get details for a contact.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "contact_id", "type": "STRING", "description": "Contact ID"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"id": "string", "name": "string", "email": "string"}
+    },
+    {
+      "name": "create_contact",
+      "description": "Create a new contact.",
+      "method": "POST",
+      "required_parameters": [
+        {"name": "name", "type": "STRING", "description": "Contact name"},
+        {"name": "email", "type": "STRING", "description": "Email address"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"contact_id": "string", "status": "string"}
+    }
+  ]
+}

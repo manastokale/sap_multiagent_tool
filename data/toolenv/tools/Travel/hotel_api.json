@@ -1,0 +1,43 @@
+{
+  "tool_name": "hotel_api",
+  "tool_description": "Search, inspect, and book hotels.",
+  "api_list": [
+    {
+      "name": "search_hotels",
+      "description": "Search for hotels in a city.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "city", "type": "STRING", "description": "Destination city"}
+      ],
+      "optional_parameters": [
+        {"name": "max_price", "type": "NUMBER", "description": "Maximum nightly price"},
+        {"name": "currency", "type": "STRING", "description": "Currency code", "default": "USD"}
+      ],
+      "response_schema": {"results": [{"id": "string", "name": "string", "price": "number"}]}
+    },
+    {
+      "name": "get_hotel_details",
+      "description": "Get detailed information for a hotel returned by search.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "hotel_id", "type": "STRING", "description": "Hotel ID from search"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"id": "string", "name": "string", "details": "string"}
+    },
+    {
+      "name": "book_hotel",
+      "description": "Book a hotel room.",
+      "method": "POST",
+      "required_parameters": [
+        {"name": "hotel_id", "type": "STRING", "description": "Hotel ID"},
+        {"name": "check_in", "type": "STRING", "description": "Check-in date"},
+        {"name": "check_out", "type": "STRING", "description": "Check-out date"}
+      ],
+      "optional_parameters": [
+        {"name": "guests", "type": "INTEGER", "description": "Number of guests", "default": 1}
+      ],
+      "response_schema": {"confirmation_id": "string", "status": "string"}
+    }
+  ]
+}

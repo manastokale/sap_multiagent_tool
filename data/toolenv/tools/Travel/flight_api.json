@@ -1,0 +1,30 @@
+{
+  "tool_name": "flight_api",
+  "tool_description": "Search and book flights.",
+  "api_list": [
+    {
+      "name": "search_flights",
+      "description": "Search for flights between cities.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "origin", "type": "STRING", "description": "Origin city"},
+        {"name": "destination", "type": "STRING", "description": "Destination city"},
+        {"name": "date", "type": "STRING", "description": "Travel date"}
+      ],
+      "optional_parameters": [
+        {"name": "max_price", "type": "NUMBER", "description": "Maximum ticket price"}
+      ],
+      "response_schema": {"results": [{"id": "string", "name": "string", "price": "number"}]}
+    },
+    {
+      "name": "book_flight",
+      "description": "Book a selected flight.",
+      "method": "POST",
+      "required_parameters": [
+        {"name": "flight_id", "type": "STRING", "description": "Flight ID from search"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"confirmation_id": "string", "status": "string"}
+    }
+  ]
+}

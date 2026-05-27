@@ -1,0 +1,42 @@
+{
+  "tool_name": "restaurant_api",
+  "tool_description": "Find restaurants and reserve tables.",
+  "api_list": [
+    {
+      "name": "search_restaurants",
+      "description": "Search restaurants in a city.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "city", "type": "STRING", "description": "City name"}
+      ],
+      "optional_parameters": [
+        {"name": "party_size", "type": "INTEGER", "description": "Number of diners"}
+      ],
+      "response_schema": {"results": [{"id": "string", "name": "string", "rating": "number"}]}
+    },
+    {
+      "name": "get_restaurant_details",
+      "description": "Get details for a restaurant returned by search.",
+      "method": "GET",
+      "required_parameters": [
+        {"name": "restaurant_id", "type": "STRING", "description": "Restaurant ID"}
+      ],
+      "optional_parameters": [],
+      "response_schema": {"id": "string", "name": "string", "details": "string"}
+    },
+    {
+      "name": "reserve_table",
+      "description": "Reserve a table at a restaurant.",
+      "method": "POST",
+      "required_parameters": [
+        {"name": "restaurant_id", "type": "STRING", "description": "Restaurant ID"},
+        {"name": "date", "type": "STRING", "description": "Reservation date"},
+        {"name": "time", "type": "STRING", "description": "Reservation time"}
+      ],
+      "optional_parameters": [
+        {"name": "party_size", "type": "INTEGER", "description": "Number of diners"}
+      ],
+      "response_schema": {"confirmation_id": "string", "status": "string"}
+    }
+  ]
+}
