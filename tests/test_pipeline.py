@@ -31,6 +31,17 @@ def test_build_artifacts_writes_registry_and_graph_files(tmp_path):
     assert paths["graph_stats"].exists()
     assert paths["endpoints"].exists()
     assert paths["edges"].exists()
+    assert paths["registry_stats_diagram"].exists()
+    assert paths["graph_stats_diagram"].exists()
+    assert paths["endpoints_diagram"].exists()
+    assert paths["edges_diagram"].exists()
+    for key in (
+        "registry_stats_diagram",
+        "graph_stats_diagram",
+        "endpoints_diagram",
+        "edges_diagram",
+    ):
+        assert "```mermaid" in paths[key].read_text(encoding="utf-8")
 
 
 def test_compute_diversity_metrics():
@@ -104,6 +115,30 @@ def test_offline_pipeline_generates_100_sample_dataset(tmp_path):
         for conv in conversations
         for msg in conv.messages
     )
+    assert all(len(conv.step_trace) == conv.metadata.num_tool_calls for conv in conversations)
+    assert any(
+        any(
+            source.source == "previous_tool_result"
+            for source in step.argument_sources.values()
+        )
+        for conv in conversations
+        for step in conv.step_trace
+    )
+    for conv in conversations:
+        visible_text = "\n".join(
+            str(msg.content)
+            for msg in conv.messages
+            if msg.role in {"user", "assistant"} and msg.content
+        ).lower()
+        for endpoint_id in conv.metadata.tools_used:
+            tool_name, _, endpoint_name = endpoint_id.partition("/")
+            forbidden = {
+                endpoint_id.lower(),
+                tool_name.lower(),
+                endpoint_name.lower(),
+                endpoint_name.replace("_", " ").lower(),
+            }
+            assert not any(token and token in visible_text for token in forbidden)
 
     metrics = compute_diversity_metrics(conversations)
     assert metrics.unique_domains_used >= 3
@@ -146,3 +181,24 @@ def test_pipeline_progress_callbacks_for_generate_and_evaluate(tmp_path):
     assert evaluate_updates[-1][0] == 3
     assert evaluate_updates[-1][1] == 3
     assert "score=" in evaluate_updates[-1][2]
+
+
+def test_parallel_offline_generation_preserves_output_order(tmp_path):
+    settings = _settings(tmp_path).model_copy(update={"max_parallel_conversations": 3})
+    pipeline = Pipeline(settings)
+    pipeline.load_registry()
+    pipeline.build_graph()
+    output_path = tmp_path / "parallel.jsonl"
+
+    conversations = pipeline.generate(
+        num_conversations=8,
+        seed=11,
+        enable_steering=False,
+        enable_repair=False,
+        output_path=output_path,
+    )
+
+    assert [conv.conversation_id for conv in conversations] == [
+        f"conv_{i:04d}" for i in range(8)
+    ]
+    assert output_path.read_text().splitlines()[0].startswith('{"conversation_id": "conv_0000"')

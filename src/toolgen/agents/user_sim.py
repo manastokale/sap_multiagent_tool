@@ -14,19 +14,19 @@ from toolgen.models import Message, ScenarioPlan
 
 logger = logging.getLogger(__name__)
 
+_MAX_HISTORY_MESSAGES = 6
+_MAX_HISTORY_CHARS = 900
+_MAX_USER_MESSAGE_CHARS = 220
+_MAX_TOOL_SUMMARY_CHARS = 240
+
 _USER_SIM_SYSTEM_INSTRUCTION = """\
-You are simulating a real user interacting with an AI assistant.
-You must stay in character based on the persona provided.
+Simulate a real user chatting with an AI assistant.
 
 Rules:
-- Keep messages concise and natural — like real chat messages
-- When the assistant asks clarifying questions, provide the requested info
-  (but sometimes be slightly vague to keep it realistic)
-- If the assistant completes your task, acknowledge it naturally
-- Don't be overly polite or formal unless the persona calls for it
-- Don't mention tools, APIs, or technical details — you're just a user
-- Vary message length: some short, some with more detail
-- If the scenario calls for it, add follow-up requests after the main task
+- Stay in persona.
+- Keep replies natural and brief, usually 1 sentence.
+- Answer clarifying questions with requested details.
+- Never mention tools, APIs, endpoints, or technical details.
 """
 
 
@@ -36,13 +36,12 @@ def generate_initial_message(
     strict_live: bool = False,
 ) -> str:
     """Generate the user's opening message based on the scenario."""
+    missing = "; ".join(plan.disambiguation_points) if plan.disambiguation_points else "none"
     prompt = (
-        f"You are playing this character: {plan.user_persona}\n\n"
+        f"Persona: {plan.user_persona}\n"
         f"Scenario: {plan.scenario}\n\n"
-        f"The following information should be intentionally left vague or missing "
-        f"from your initial message (the assistant should ask about these):\n"
-        f"- {chr(10).join(plan.disambiguation_points) if plan.disambiguation_points else 'none'}\n\n"
-        f"Write your opening message to the assistant. Keep it natural and concise."
+        f"Leave vague/missing: {missing}\n"
+        "Write the opening user message in 35 words or fewer."
     )
 
     response = client.generate(
@@ -57,7 +56,7 @@ def generate_initial_message(
         logger.warning("User sim initial message failed: %s", response.error)
         return f"Hey, I need help with {plan.scenario}"
 
-    return response.text.strip()
+    return _shorten_user_message(response.text)
 
 
 def generate_response(
@@ -71,23 +70,23 @@ def generate_response(
     # Build conversation context
     history_text = "\n".join(
         f"{msg.role.upper()}: {msg.content}"
-        for msg in conversation_history
+        for msg in _trim_history(conversation_history)
         if msg.content and msg.role in ("user", "assistant")
     )
+    history_text = _shorten(history_text, _MAX_HISTORY_CHARS)
 
     prompt = (
-        f"You are playing this character: {plan.user_persona}\n\n"
-        f"Scenario: {plan.scenario}\n\n"
+        f"Persona: {plan.user_persona}\n"
+        f"Scenario: {plan.scenario}\n"
         f"Conversation so far:\n{history_text}\n\n"
     )
 
     if tool_results_summary:
-        prompt += f"The assistant just got these tool results: {tool_results_summary}\n\n"
+        prompt += f"Latest assistant summary: {_shorten(tool_results_summary, _MAX_TOOL_SUMMARY_CHARS)}\n\n"
 
     prompt += (
-        "Write your next message as the user. Keep it natural and concise.\n"
-        "If the assistant asked a question, answer it.\n"
-        "If the task seems complete, thank them or ask a follow-up."
+        "Write the next user message in 35 words or fewer. "
+        "Answer a question if asked; if complete, acknowledge briefly."
     )
 
     response = client.generate(
@@ -102,7 +101,33 @@ def generate_response(
         logger.warning("User sim response failed: %s", response.error)
         return "Sure, that sounds good. Can you go ahead with that?"
 
-    return response.text.strip()
+    return _shorten_user_message(response.text)
+
+
+def _shorten_user_message(text: str) -> str:
+    return _shorten(text.strip(), _MAX_USER_MESSAGE_CHARS)
+
+
+def _trim_history(conversation_history: list[Message]) -> list[Message]:
+    selected = conversation_history[-_MAX_HISTORY_MESSAGES:]
+    first_user = next((msg for msg in conversation_history if msg.role == "user"), None)
+    if first_user and all(msg is not first_user for msg in selected):
+        selected = [first_user, *selected[-(_MAX_HISTORY_MESSAGES - 1):]]
+    return selected
+
+
+def _shorten(text: str, max_chars: int) -> str:
+    normalized = " ".join(str(text).split())
+    if len(normalized) <= max_chars:
+        return normalized
+    boundary = max(
+        normalized.rfind(". ", 0, max_chars),
+        normalized.rfind("? ", 0, max_chars),
+        normalized.rfind("! ", 0, max_chars),
+    )
+    if boundary >= max_chars // 2:
+        return normalized[: boundary + 1]
+    return normalized[: max_chars - 1].rstrip() + "..."
 
 
 def should_end_conversation(

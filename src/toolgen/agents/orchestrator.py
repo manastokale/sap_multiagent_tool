@@ -7,8 +7,11 @@ and manages conversation state, turn limits, and structural validation.
 
 from __future__ import annotations
 
+import json
 import logging
 import random
+import re
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -23,6 +26,7 @@ from toolgen.agents.assistant import generate_assistant_turn
 from toolgen.executor.mock_executor import MockExecutor
 from toolgen.models import (
     APIEndpoint,
+    ArgumentSource,
     Conversation,
     ConversationMetadata,
     Message,
@@ -30,6 +34,7 @@ from toolgen.models import (
     SteeringGuidance,
     ToolCall,
     ToolChain,
+    ToolStepTrace,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +54,8 @@ def generate_conversation(
     model_name: str = "",
     strict_live: bool = False,
     live_profile: str = "full",
+    role_clients: dict[str, LLMClient] | None = None,
+    event_callback: Callable[[str], None] | None = None,
 ) -> Conversation:
     """Generate a single conversation from a tool chain.
 
@@ -62,15 +69,32 @@ def generate_conversation(
     executor.reset()
     hybrid_live = _is_hybrid_live(live_profile)
     rng = random.Random(seed + conversation_index)
+    role_clients = role_clients or {}
+    planner_client = role_clients.get("planner", client)
+    assistant_client = role_clients.get("assistant", client)
+    user_client = role_clients.get("user", client)
+    summary_client = role_clients.get("summary", assistant_client)
 
     # Step 1: Plan the scenario
     logger.info("Generating conversation %d with chain: %s", conversation_index, chain.endpoint_ids)
-    plan = plan_scenario(client, chain, steering, strict_live=strict_live)
+    _emit_event(
+        event_callback,
+        f"conv_{conversation_index:04d} | planner | creating scenario | "
+        f"{chain.num_steps} step(s), {chain.num_distinct_tools} tool(s)",
+    )
+    plan = plan_scenario(planner_client, chain, steering, strict_live=strict_live)
+    _emit_event(
+        event_callback,
+        f"conv_{conversation_index:04d} | planner | scenario ready | "
+        f"{_truncate_status(plan.scenario, 90)}",
+    )
     logger.debug("Scenario: %s", plan.scenario)
 
     # Initialize conversation
     messages: list[Message] = []
     tools_used: list[str] = []
+    step_trace: list[ToolStepTrace] = []
+    prior_tool_results: list[tuple[str, dict[str, Any]]] = []
     num_tool_calls = 0
     available_tools = chain.endpoints
 
@@ -78,16 +102,27 @@ def generate_conversation(
     initial_msg = (
         _offline_initial_request(plan, chain, rng)
         if hybrid_live
-        else generate_initial_message(client, plan, strict_live=strict_live)
+        else generate_initial_message(user_client, plan, strict_live=strict_live)
     )
+    initial_msg = _sanitize_user_facing_text(initial_msg, available_tools)
     messages.append(Message(role="user", content=initial_msg))
+    _emit_event(
+        event_callback,
+        f"conv_{conversation_index:04d} | user | opening request | "
+        f"{_truncate_status(initial_msg, 90)}",
+    )
     logger.debug("User: %s", initial_msg[:100])
 
     # Step 3: Conversation loop
     for turn in range(max_turns):
         # Assistant's turn
+        _emit_event(
+            event_callback,
+            f"conv_{conversation_index:04d} | turn {turn + 1}/{max_turns} | "
+            "assistant deciding",
+        )
         text_response, tool_call = generate_assistant_turn(
-            client,
+            assistant_client,
             messages,
             available_tools,
             session_context=executor.get_session_summary(),
@@ -95,6 +130,11 @@ def generate_conversation(
         )
 
         if tool_call:
+            _emit_event(
+                event_callback,
+                f"conv_{conversation_index:04d} | turn {turn + 1} | "
+                f"tool call {tool_call.endpoint} | args={_format_arg_keys(tool_call.arguments)}",
+            )
             # Record the tool call
             messages.append(Message(
                 role="assistant",
@@ -112,9 +152,34 @@ def generate_conversation(
                     break
 
             if endpoint:
+                _emit_event(
+                    event_callback,
+                    f"conv_{conversation_index:04d} | turn {turn + 1} | "
+                    f"executing {tool_call.endpoint}",
+                )
                 result = executor.execute(endpoint, tool_call.arguments)
             else:
                 result = {"error": f"Unknown endpoint: {tool_call.endpoint}"}
+
+            step_trace.append(
+                _build_step_trace(
+                    step_index=num_tool_calls,
+                    endpoint=endpoint,
+                    endpoint_id=tool_call.endpoint,
+                    tool_call=tool_call,
+                    result=result,
+                    messages=messages,
+                    prior_tool_results=prior_tool_results,
+                    total_steps=len(chain.endpoints),
+                    fallback_source="assistant_inferred",
+                )
+            )
+            prior_tool_results.append((tool_call.endpoint, result))
+            _emit_event(
+                event_callback,
+                f"conv_{conversation_index:04d} | turn {turn + 1} | "
+                f"result received | refs={_format_output_refs(result)}",
+            )
 
             # Add tool result
             messages.append(Message(role="tool", content=result))
@@ -124,29 +189,45 @@ def generate_conversation(
             # summary so only the actual tool-decision turns consume LLM calls.
             if hybrid_live:
                 summary_text = _hybrid_tool_summary(
-                    tool_call.endpoint,
                     result,
                     num_tool_calls,
                     len(chain.endpoints),
                 )
             else:
                 summary_text, _ = generate_assistant_turn(
-                    client,
+                    summary_client,
                     messages,
                     available_tools,
                     session_context=executor.get_session_summary(),
                     strict_live=strict_live,
                 )
             if summary_text:
+                summary_text = _sanitize_user_facing_text(summary_text, available_tools)
                 messages.append(Message(role="assistant", content=summary_text))
+                _emit_event(
+                    event_callback,
+                    f"conv_{conversation_index:04d} | turn {turn + 1} | "
+                    f"assistant summary | {_truncate_status(summary_text, 90)}",
+                )
                 logger.debug("Assistant: %s", summary_text[:100])
 
         elif text_response:
+            text_response = _sanitize_user_facing_text(text_response, available_tools)
             messages.append(Message(role="assistant", content=text_response))
+            _emit_event(
+                event_callback,
+                f"conv_{conversation_index:04d} | turn {turn + 1} | "
+                f"assistant text | {_truncate_status(text_response, 90)}",
+            )
             logger.debug("Assistant: %s", text_response[:100])
 
         # Check if conversation should end
         if should_end_conversation(plan, messages, num_tool_calls):
+            _emit_event(
+                event_callback,
+                f"conv_{conversation_index:04d} | complete | "
+                f"{num_tool_calls} tool call(s), {len(messages)} message(s)",
+            )
             logger.debug("Conversation %d ending (task complete)", conversation_index)
             break
 
@@ -167,14 +248,20 @@ def generate_conversation(
                 )
                 if hybrid_live
                 else generate_response(
-                    client,
+                    user_client,
                     plan,
                     messages,
                     tool_results_summary=tool_summary,
                     strict_live=strict_live,
                 )
             )
+            user_msg = _sanitize_user_facing_text(user_msg, available_tools)
             messages.append(Message(role="user", content=user_msg))
+            _emit_event(
+                event_callback,
+                f"conv_{conversation_index:04d} | user | follow-up | "
+                f"{_truncate_status(user_msg, 90)}",
+            )
             logger.debug("User: %s", user_msg[:100])
 
     # Build conversation record
@@ -184,6 +271,7 @@ def generate_conversation(
     conversation = Conversation(
         conversation_id=f"conv_{conversation_index:04d}",
         messages=messages,
+        step_trace=step_trace,
         metadata=ConversationMetadata(
             seed=seed,
             conversation_index=conversation_index,
@@ -221,6 +309,7 @@ def generate_offline_conversation(
     max_turns: int = 15,
     steering: SteeringGuidance | None = None,
     model_name: str = "offline-deterministic",
+    event_callback: Callable[[str], None] | None = None,
 ) -> Conversation:
     """Generate a deterministic conversation without remote LLM calls.
 
@@ -231,42 +320,114 @@ def generate_offline_conversation(
     """
     executor.reset()
     rng = random.Random(seed + conversation_index)
+    _emit_event(
+        event_callback,
+        f"conv_{conversation_index:04d} | offline | planning deterministic scenario | "
+        f"{chain.num_steps} step(s), {chain.num_distinct_tools} tool(s)",
+    )
     plan = _offline_plan(chain, steering)
 
     messages: list[Message] = [
-        Message(role="user", content=_offline_initial_request(plan, chain, rng))
+        Message(
+            role="user",
+            content=_sanitize_user_facing_text(
+                _offline_initial_request(plan, chain, rng),
+                chain.endpoints,
+            ),
+        )
     ]
 
     first_required = _visible_required_params(chain.endpoints[0]) if chain.endpoints else []
     if first_required:
-        messages.append(Message(role="assistant", content=_clarifying_question(first_required)))
-        messages.append(Message(role="user", content=_clarifying_answer(first_required, rng)))
+        _emit_event(
+            event_callback,
+            f"conv_{conversation_index:04d} | offline | clarifying required fields | "
+            f"{', '.join(first_required)}",
+        )
+        messages.append(
+            Message(
+                role="assistant",
+                content=_sanitize_user_facing_text(
+                    _clarifying_question(first_required),
+                    chain.endpoints,
+                ),
+            )
+        )
+        messages.append(
+            Message(
+                role="user",
+                content=_sanitize_user_facing_text(
+                    _clarifying_answer(first_required, rng),
+                    chain.endpoints,
+                ),
+            )
+        )
 
     tools_used: list[str] = []
+    step_trace: list[ToolStepTrace] = []
+    prior_tool_results: list[tuple[str, dict[str, Any]]] = []
     value_context: dict[str, Any] = {}
     results_seen: list[dict[str, Any]] = []
 
     for step_index, endpoint in enumerate(chain.endpoints[:max_turns]):
+        _emit_event(
+            event_callback,
+            f"conv_{conversation_index:04d} | offline step {step_index + 1}/{chain.num_steps} | "
+            f"building args for {endpoint.endpoint_id}",
+        )
         args = _build_arguments(endpoint, value_context, rng, step_index)
         tool_call = ToolCall(endpoint=endpoint.endpoint_id, arguments=args)
         messages.append(Message(role="assistant", content=None, tool_calls=[tool_call]))
         tools_used.append(endpoint.endpoint_id)
 
+        _emit_event(
+            event_callback,
+            f"conv_{conversation_index:04d} | offline step {step_index + 1}/{chain.num_steps} | "
+            f"executing {endpoint.endpoint_id} | args={_format_arg_keys(args)}",
+        )
         result = executor.execute(endpoint, args)
         messages.append(Message(role="tool", content=result))
         results_seen.append(result)
+        step_trace.append(
+            _build_step_trace(
+                step_index=step_index + 1,
+                endpoint=endpoint,
+                endpoint_id=endpoint.endpoint_id,
+                tool_call=tool_call,
+                result=result,
+                messages=messages,
+                prior_tool_results=prior_tool_results,
+                total_steps=len(chain.endpoints),
+                fallback_source="deterministic_generator",
+            )
+        )
+        prior_tool_results.append((endpoint.endpoint_id, result))
+        _emit_event(
+            event_callback,
+            f"conv_{conversation_index:04d} | offline step {step_index + 1}/{chain.num_steps} | "
+            f"result refs={_format_output_refs(result)}",
+        )
         _remember_result(endpoint, result, value_context)
 
     messages.append(
         Message(
             role="assistant",
-            content=_offline_final_answer(chain, results_seen, value_context),
+            content=_sanitize_user_facing_text(
+                _offline_final_answer(chain, results_seen, value_context),
+                chain.endpoints,
+            ),
         )
+    )
+    _emit_event(
+        event_callback,
+        f"conv_{conversation_index:04d} | offline | conversation ready | "
+        f"{len(tools_used)} tool call(s), {len(messages)} message(s)",
     )
 
     return Conversation(
         conversation_id=f"conv_{conversation_index:04d}",
         messages=messages,
+        step_trace=step_trace,
         metadata=ConversationMetadata(
             seed=seed,
             conversation_index=conversation_index,
@@ -304,33 +465,90 @@ def _hybrid_user_response(
 ) -> str:
     if latest_assistant_text and "?" in latest_assistant_text:
         next_index = min(num_tool_calls_made, max(len(chain.endpoints) - 1, 0))
-        params = _visible_required_params(chain.endpoints[next_index]) if chain.endpoints else []
+        params = _hybrid_user_supplied_params(chain.endpoints[next_index]) if chain.endpoints else []
         if params:
             return _clarifying_answer(params, rng)
-        return "Use the most relevant available option and continue."
+        return "Whatever looks best is fine. Please go ahead."
 
     if num_tool_calls_made < len(plan.expected_tool_sequence):
-        return "Yes, continue with the next step using that result."
+        return "Yes, please go ahead with that."
     return "Thanks, that covers what I needed."
 
 
 def _hybrid_tool_summary(
-    endpoint_id: str,
     result: dict[str, Any],
     num_tool_calls_made: int,
     expected_tool_calls: int,
 ) -> str:
     reference = _first_reference(result) or "the returned result"
-    endpoint_name = endpoint_id.split("/")[-1]
     if num_tool_calls_made >= expected_tool_calls:
-        return (
-            f"Done. I completed {endpoint_name} and used reference {reference} "
-            "for the final result."
-        )
+        return f"Done, that is taken care of. Your reference is {reference}."
     return (
-        f"I received the result from {endpoint_name} and will use reference "
-        f"{reference} for the next step."
+        f"I found the details I needed and will use reference {reference} "
+        "to continue."
     )
+
+
+def _emit_event(callback: Callable[[str], None] | None, label: str) -> None:
+    if callback:
+        callback(label)
+
+
+def _format_arg_keys(arguments: dict[str, Any]) -> str:
+    if not arguments:
+        return "none"
+    keys = list(arguments)[:5]
+    suffix = "" if len(arguments) <= 5 else f"+{len(arguments) - 5}"
+    return ",".join(keys) + suffix
+
+
+def _format_output_refs(result: dict[str, Any]) -> str:
+    refs = _extract_output_refs(result)
+    if not refs:
+        return "none"
+    items = [f"{path}={_truncate_status(str(value), 28)}" for path, value in list(refs.items())[:3]]
+    suffix = "" if len(refs) <= 3 else f"+{len(refs) - 3}"
+    return ",".join(items) + suffix
+
+
+def _truncate_status(value: str, max_chars: int = 120) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 1].rstrip() + "…"
+
+
+def _sanitize_user_facing_text(text: str, endpoints: list[APIEndpoint]) -> str:
+    """Remove raw tool/API identifiers from visible chat text.
+
+    Tool names and endpoint ids remain in structured fields (`tool_calls`,
+    `step_trace`, metadata). This only protects user/assistant prose.
+    """
+    sanitized = text
+    for endpoint in endpoints:
+        natural = _natural_task_description(endpoint)
+        replacements = {
+            endpoint.endpoint_id: natural,
+            endpoint.endpoint_name: natural,
+            endpoint.endpoint_name.replace("_", " "): natural,
+            endpoint.tool_name: "the service",
+            endpoint.tool_name.replace("_", " "): "the service",
+        }
+        for raw, replacement in replacements.items():
+            if raw:
+                sanitized = re.sub(
+                    re.escape(raw),
+                    replacement,
+                    sanitized,
+                    flags=re.IGNORECASE,
+                )
+
+    sanitized = re.sub(r"\bAPIs?\b", "service", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\bendpoints\b", "options", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\bendpoint\b", "option", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\btools\b", "steps", sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\btool\b", "step", sanitized, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", sanitized).strip()
 
 
 def _first_reference(value: Any) -> str | None:
@@ -352,29 +570,229 @@ def _first_reference(value: Any) -> str | None:
     return None
 
 
+def _build_step_trace(
+    step_index: int,
+    endpoint: APIEndpoint | None,
+    endpoint_id: str,
+    tool_call: ToolCall,
+    result: dict[str, Any],
+    messages: list[Message],
+    prior_tool_results: list[tuple[str, dict[str, Any]]],
+    total_steps: int,
+    fallback_source: str,
+) -> ToolStepTrace:
+    argument_sources = _infer_argument_sources(
+        arguments=tool_call.arguments,
+        endpoint=endpoint,
+        messages=messages,
+        prior_tool_results=prior_tool_results,
+        fallback_source=fallback_source,
+    )
+    depends_on = []
+    for source in argument_sources.values():
+        if source.source_endpoint and source.source_endpoint not in depends_on:
+            depends_on.append(source.source_endpoint)
+
+    return ToolStepTrace(
+        step=step_index,
+        endpoint=endpoint_id,
+        goal=_step_goal(endpoint, endpoint_id, step_index, total_steps),
+        depends_on=depends_on,
+        argument_sources=argument_sources,
+        output_refs=_extract_output_refs(result),
+        status="error" if isinstance(result, dict) and result.get("error") else "ok",
+    )
+
+
+def _infer_argument_sources(
+    arguments: dict[str, Any],
+    endpoint: APIEndpoint | None,
+    messages: list[Message],
+    prior_tool_results: list[tuple[str, dict[str, Any]]],
+    fallback_source: str,
+) -> dict[str, ArgumentSource]:
+    sources: dict[str, ArgumentSource] = {}
+    parameter_map = {param.name: param for param in endpoint.parameters} if endpoint else {}
+
+    for name, value in arguments.items():
+        source_endpoint, evidence = _find_value_in_prior_results(value, prior_tool_results)
+        if source_endpoint:
+            sources[name] = ArgumentSource(
+                source="previous_tool_result",
+                value=value,
+                evidence=evidence,
+                source_endpoint=source_endpoint,
+            )
+            continue
+
+        if _value_appears_in_user_messages(value, messages):
+            sources[name] = ArgumentSource(
+                source="user_request",
+                value=value,
+                evidence="value appeared in a prior user message",
+            )
+            continue
+
+        parameter = parameter_map.get(name)
+        if parameter and parameter.default not in (None, "") and value == parameter.default:
+            sources[name] = ArgumentSource(
+                source="tool_default",
+                value=value,
+                evidence=f"default value for parameter {name}",
+            )
+            continue
+
+        sources[name] = ArgumentSource(
+            source=fallback_source,
+            value=value,
+            evidence="filled from the sampled schema and generator policy",
+        )
+
+    return sources
+
+
+def _find_value_in_prior_results(
+    value: Any,
+    prior_tool_results: list[tuple[str, dict[str, Any]]],
+) -> tuple[str | None, str]:
+    needle = _stable_value(value)
+    if needle == "":
+        return None, ""
+    for endpoint_id, result in reversed(prior_tool_results):
+        for path, candidate in _flatten_primitive_values(result):
+            if _stable_value(candidate) == needle:
+                return endpoint_id, f"matched {path} from {endpoint_id}"
+    return None, ""
+
+
+def _value_appears_in_user_messages(value: Any, messages: list[Message]) -> bool:
+    needle = _stable_value(value).lower()
+    if not needle:
+        return False
+    for message in messages:
+        if message.role != "user":
+            continue
+        haystack = _message_content_text(message.content).lower()
+        if needle in haystack:
+            return True
+    return False
+
+
+def _message_content_text(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    try:
+        return json.dumps(content, sort_keys=True, default=str)
+    except TypeError:
+        return str(content)
+
+
+def _stable_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, bool | int | float):
+        return str(value)
+    try:
+        return json.dumps(value, sort_keys=True, default=str)
+    except TypeError:
+        return str(value)
+
+
+def _flatten_primitive_values(value: Any, path: str = "$") -> list[tuple[str, Any]]:
+    if isinstance(value, dict):
+        flattened: list[tuple[str, Any]] = []
+        for key, child in value.items():
+            flattened.extend(_flatten_primitive_values(child, f"{path}.{key}"))
+        return flattened
+    if isinstance(value, list):
+        flattened = []
+        for index, child in enumerate(value):
+            flattened.extend(_flatten_primitive_values(child, f"{path}[{index}]"))
+        return flattened
+    if isinstance(value, str | int | float | bool):
+        return [(path, value)]
+    return []
+
+
+def _extract_output_refs(result: dict[str, Any]) -> dict[str, Any]:
+    refs: dict[str, Any] = {}
+    for path, value in _flatten_primitive_values(result):
+        key = path.rsplit(".", 1)[-1].lower()
+        if key == "id" or key.endswith("_id") or key in {"confirmation_id", "status"}:
+            refs[path] = value
+    return refs
+
+
+def _step_goal(
+    endpoint: APIEndpoint | None,
+    endpoint_id: str,
+    step_index: int,
+    total_steps: int,
+) -> str:
+    readable = endpoint.endpoint_name.replace("_", " ") if endpoint else endpoint_id
+    description = endpoint.description.strip() if endpoint and endpoint.description else ""
+    prefix = f"Step {step_index}/{max(total_steps, step_index)}"
+    if description:
+        return f"{prefix}: {description}"
+    return f"{prefix}: call {readable}"
+
+
+def _natural_task_description(endpoint: APIEndpoint | None) -> str:
+    if endpoint is None:
+        return "get something handled"
+    if endpoint.description:
+        return _soften_task_phrase(endpoint.description.strip().rstrip(".").lower())
+    name = endpoint.endpoint_name.replace("_", " ").strip().lower()
+    return _soften_task_phrase(name or "get something handled")
+
+
+def _soften_task_phrase(phrase: str) -> str:
+    replacements = {
+        "get ": "look up ",
+        "create ": "set up ",
+        "book ": "book ",
+        "reserve ": "reserve ",
+        "search ": "look for ",
+        "find ": "find ",
+        "list ": "review ",
+        "update ": "update ",
+        "cancel ": "cancel ",
+        "delete ": "remove ",
+    }
+    for prefix, replacement in replacements.items():
+        if phrase.startswith(prefix):
+            return replacement + phrase[len(prefix):]
+    return phrase or "get something handled"
+
+
 def _offline_plan(chain: ToolChain, steering: SteeringGuidance | None) -> ScenarioPlan:
     domains = ", ".join(sorted(chain.categories)) or "general"
     first = chain.endpoints[0] if chain.endpoints else None
-    task = first.endpoint_name.replace("_", " ") if first else "complete a task"
+    task = _natural_task_description(first) if first else "get something handled"
     rationale = ""
     if steering and steering.prefer_domains:
         rationale = f" Prefer under-covered domains such as {', '.join(steering.prefer_domains[:2])}."
 
     return ScenarioPlan(
-        scenario=f"The user needs help with a {domains.lower()} workflow that starts with {task}.",
+        scenario=f"The user needs help with {domains.lower()} and wants to {task}.",
         user_persona="A concise business user who gives missing details when asked.",
         expected_tool_sequence=chain.endpoint_ids,
         disambiguation_points=["required search criteria", "date or budget constraints"],
         complexity="multi_step_with_disambiguation"
         if chain.num_steps >= 3
         else ("multi_step" if chain.num_steps > 1 else "single_step"),
-    ).model_copy(update={"scenario": f"The user needs help with a {domains.lower()} workflow that starts with {task}.{rationale}"})
+    ).model_copy(update={"scenario": f"The user needs help with {domains.lower()} and wants to {task}.{rationale}"})
 
 
 def _offline_initial_request(plan: ScenarioPlan, chain: ToolChain, rng: random.Random) -> str:
-    domain = next(iter(chain.categories), "this")
     topic = rng.choice(_TOPIC_VALUES)
-    return f"I need help with {domain.lower()} for {topic}. Can you take care of it?"
+    first = chain.endpoints[0] if chain.endpoints else None
+    task = _natural_task_description(first)
+    return f"I'm working on {topic} and need to {task}. Can you help me with that?"
 
 
 def _visible_required_params(endpoint: APIEndpoint) -> list[str]:
@@ -388,15 +806,83 @@ def _visible_required_params(endpoint: APIEndpoint) -> list[str]:
     return visible[:3]
 
 
+def _hybrid_user_supplied_params(endpoint: APIEndpoint) -> list[str]:
+    """Required fields the deterministic hybrid user can provide on request.
+
+    Unlike the offline-first clarifying prompt, hybrid mode must sometimes give the
+    live assistant synthetic IDs so the assistant is allowed to call the tool instead
+    of getting stuck in a missing-identifier loop.
+    """
+    return [param.name for param in endpoint.required_parameters[:4]]
+
+
 def _clarifying_question(params: list[str]) -> str:
-    readable = ", ".join(p.replace("_", " ") for p in params)
+    readable = _join_naturally([_natural_param_label(param) for param in params])
     return f"What {readable} should I use?"
 
 
 def _clarifying_answer(params: list[str], rng: random.Random) -> str:
     values = [_value_for_name(param, rng, step_index=0) for param in params]
-    details = ", ".join(f"{param.replace('_', ' ')}: {value}" for param, value in zip(params, values))
-    return f"Use {details}."
+    details = [
+        _format_user_detail(param, value)
+        for param, value in zip(params, values)
+    ]
+    return _join_sentences(details)
+
+
+def _natural_param_label(name: str) -> str:
+    lowered = name.lower()
+    if lowered in {"id", "item_id", "resource_id"}:
+        return "reference"
+    if lowered in {"order_id", "order_number"}:
+        return "order number"
+    if lowered in {"booking_id", "reservation_id", "confirmation_id"}:
+        return "confirmation reference"
+    if lowered.endswith("_id"):
+        entity = lowered[:-3].replace("_", " ")
+        return f"{entity} reference"
+    if lowered in {"check_in", "checkin"}:
+        return "check-in date"
+    if lowered in {"check_out", "checkout"}:
+        return "check-out date"
+    if lowered == "max_price":
+        return "budget"
+    if lowered == "party_size":
+        return "party size"
+    if lowered == "email":
+        return "email address"
+    return lowered.replace("_", " ")
+
+
+def _format_user_detail(name: str, value: Any) -> str:
+    label = _natural_param_label(name)
+    lowered = name.lower()
+    if "currency" in lowered:
+        return f"Please use {value}"
+    if "email" in lowered:
+        return f"The email address is {value}"
+    if "date" in lowered or lowered in {"check_in", "check_out", "checkin", "checkout"}:
+        return f"The {label} is {value}"
+    if lowered in {"origin", "destination", "city", "location"} or "city" in lowered:
+        return f"The {label} is {value}"
+    return f"The {label} is {value}"
+
+
+def _join_naturally(items: list[str]) -> str:
+    if not items:
+        return "details"
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+
+def _join_sentences(sentences: list[str]) -> str:
+    cleaned = [sentence.strip().rstrip(".") for sentence in sentences if sentence.strip()]
+    if not cleaned:
+        return "I can share whatever details you need."
+    return ". ".join(cleaned) + "."
 
 
 def _build_arguments(
@@ -456,6 +942,10 @@ def _value_for_name(
     param_type: str = "string",
 ) -> Any:
     lowered = name.lower()
+    if lowered.endswith("_id") or lowered in {"id", "item_id", "resource_id"}:
+        entity = lowered[:-3] if lowered.endswith("_id") else "item"
+        entity = entity or "item"
+        return f"{entity}_{1000 + step_index * 10 + rng.randint(1, 9)}"
     if "city" in lowered or "location" in lowered:
         return rng.choice(_CITY_VALUES)
     if lowered == "origin":
@@ -549,7 +1039,7 @@ def _offline_final_answer(
     value_context: dict[str, Any],
 ) -> str:
     if not results_seen:
-        return "I could not complete the task because no tools returned results."
+        return "I could not complete that because I did not get a usable result."
 
     confirmation = (
         value_context.get("confirmation_id")
@@ -557,8 +1047,4 @@ def _offline_final_answer(
         or value_context.get("last_id")
         or "available"
     )
-    final_endpoint = chain.endpoint_ids[-1] if chain.endpoint_ids else "the requested workflow"
-    return (
-        f"Done. I completed the workflow through {final_endpoint} and used the returned "
-        f"reference {confirmation} for the final step."
-    )
+    return f"Done, that is taken care of. Your reference is {confirmation}."

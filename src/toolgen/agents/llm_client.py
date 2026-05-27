@@ -1,8 +1,7 @@
 """LLM client abstraction layer.
 
-Wraps live Gemini and Groq calls with retry, rate limiting, provider fallback, and
-structured output support. Designed to be swappable: the rest of the codebase only sees
-this interface.
+Wraps live Gemini calls with retry, shared rate limiting, model fallback, and structured
+output support. The rest of the codebase only sees this interface.
 """
 
 from __future__ import annotations
@@ -11,11 +10,12 @@ import json
 import logging
 import random
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from pydantic import BaseModel
@@ -32,11 +32,47 @@ class LLMResponse(BaseModel):
     error: str | None = None
 
 
+class SharedRateLimiter:
+    """Thread-safe request-start limiter shared across multiple LLM clients."""
+
+    def __init__(
+        self,
+        requests_per_minute: int = 10,
+        on_request_start: Callable[[int], None] | None = None,
+    ):
+        self._rpm = requests_per_minute
+        self._last_request_time = 0.0
+        self._request_count = 0
+        self._lock = threading.Lock()
+        self._on_request_start = on_request_start
+
+    @property
+    def request_count(self) -> int:
+        with self._lock:
+            return self._request_count
+
+    def acquire(self) -> None:
+        min_interval = 60.0 / self._rpm if self._rpm > 0 else 0.0
+        callback: Callable[[int], None] | None = None
+        request_count = 0
+        with self._lock:
+            if min_interval > 0:
+                elapsed = time.time() - self._last_request_time
+                if elapsed < min_interval:
+                    time.sleep(min_interval - elapsed)
+            self._last_request_time = time.time()
+            self._request_count += 1
+            request_count = self._request_count
+            callback = self._on_request_start
+        if callback:
+            callback(request_count)
+
+
 class LLMClient:
-    """Live LLM client with retry, provider fallback, and structured output support.
+    """Live LLM client with retry, model fallback, and structured output support.
 
     Usage:
-        client = LLMClient(api_key="...", model="gemini-2.5-flash")
+        client = LLMClient(api_key="...", model="gemini-3.1-flash-lite")
         response = client.generate("Tell me about Paris")
         structured = client.generate_json("Plan a scenario")
     """
@@ -44,29 +80,31 @@ class LLMClient:
     def __init__(
         self,
         api_key: str = "",
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.1-flash-lite",
         model_pool: Sequence[str] | str | None = None,
         provider: str = "auto",
         api_keys: dict[str, str] | None = None,
-        groq_api_key: str = "",
-        requests_per_minute: int = 30,
+        requests_per_minute: int = 10,
         max_retries: int = 3,
         request_timeout_seconds: int = 30,
+        max_output_tokens: int = 512,
         seed: int | None = None,
+        rate_limiter: SharedRateLimiter | None = None,
     ):
         self._model_pool = _normalize_model_pool(model_pool if model_pool is not None else [model])
         self._model_name = self._model_pool[0]
         self._provider_mode = provider.strip().lower()
         self._api_keys = {
             "gemini": api_key,
-            "groq": groq_api_key,
             **(api_keys or {}),
         }
         self._rng = random.Random(seed)
         self._rpm = requests_per_minute
         self._max_retries = max_retries
         self._request_timeout_seconds = request_timeout_seconds
+        self._max_output_tokens = max(1, int(max_output_tokens))
         self._last_request_time = 0.0
+        self._rate_limiter = rate_limiter
         self._disabled_model_specs: set[tuple[str, str]] = set()
 
     @property
@@ -120,6 +158,9 @@ class LLMClient:
 
     def _rate_limit(self) -> None:
         """Simple rate limiter based on RPM."""
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
+            return
         if self._rpm <= 0:
             return
         min_interval = 60.0 / self._rpm
@@ -153,7 +194,10 @@ class LLMClient:
             f"{encoded_model}:generateContent"
         )
 
-        generation_config: dict[str, Any] = {"temperature": temperature}
+        generation_config: dict[str, Any] = {
+            "temperature": temperature,
+            "maxOutputTokens": self._max_output_tokens,
+        }
         if response_mime_type:
             generation_config["responseMimeType"] = response_mime_type
 
@@ -213,73 +257,6 @@ class LLMClient:
             usage=usage if isinstance(usage, dict) else None,
         )
 
-    def _generate_groq_rest(
-        self,
-        model_name: str,
-        messages: list[dict[str, str]],
-        system_instruction: str | None,
-        temperature: float,
-        json_mode: bool = False,
-    ) -> LLMResponse:
-        """Call Groq through its OpenAI-compatible chat completions API."""
-        groq_messages: list[dict[str, str]] = []
-        if system_instruction:
-            groq_messages.append({"role": "system", "content": system_instruction})
-        groq_messages.extend(messages or [{"role": "user", "content": ""}])
-
-        payload: dict[str, Any] = {
-            "model": model_name,
-            "messages": groq_messages,
-            "temperature": temperature,
-        }
-        if json_mode:
-            payload["response_format"] = {"type": "json_object"}
-
-        request = urllib.request.Request(
-            "https://api.groq.com/openai/v1/chat/completions",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._api_keys['groq']}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "toolgen/0.1 python-urllib",
-            },
-            method="POST",
-        )
-
-        try:
-            with urllib.request.urlopen(
-                request,
-                timeout=self._request_timeout_seconds,
-            ) as response:
-                raw = response.read().decode("utf-8")
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            message = _extract_openai_compatible_error(body) or e.reason
-            return LLMResponse(error=f"Groq HTTP {e.code}: {message}", model=model_name)
-        except urllib.error.URLError as e:
-            return LLMResponse(error=f"Groq request failed: {e.reason}", model=model_name)
-        except TimeoutError:
-            return LLMResponse(error="Groq request timed out", model=model_name)
-
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError as e:
-            return LLMResponse(error=f"Groq response JSON parse error: {e}", model=model_name)
-
-        choices = data.get("choices") or []
-        text = ""
-        if choices and isinstance(choices[0], dict):
-            message = choices[0].get("message") or {}
-            text = str(message.get("content") or "")
-
-        usage = data.get("usage")
-        return LLMResponse(
-            text=text.strip(),
-            model=model_name,
-            usage=usage if isinstance(usage, dict) else None,
-        )
-
     def _generate_live(
         self,
         messages: list[dict[str, str]],
@@ -289,9 +266,9 @@ class LLMClient:
     ) -> LLMResponse:
         last_response: LLMResponse | None = None
         for attempt in range(self._max_retries):
-            self._rate_limit()
             retry_after_seconds = 0.0
             for provider, model_name in self._candidate_model_specs():
+                self._rate_limit()
                 self._model_name = model_name
                 if provider == "gemini":
                     contents = _messages_to_gemini_contents(messages)
@@ -301,14 +278,6 @@ class LLMClient:
                         system_instruction=system_instruction,
                         temperature=temperature,
                         response_mime_type="application/json" if json_mode else None,
-                    )
-                elif provider == "groq":
-                    response = self._generate_groq_rest(
-                        model_name=model_name,
-                        messages=messages,
-                        system_instruction=system_instruction,
-                        temperature=temperature,
-                        json_mode=json_mode,
                     )
                 else:
                     continue
@@ -454,7 +423,7 @@ def _normalize_model_pool(model_pool: Sequence[str] | str) -> list[str]:
         if model and model not in seen:
             models.append(model)
             seen.add(model)
-    return models or ["gemini-2.5-flash"]
+    return models or ["gemini-3.1-flash-lite"]
 
 
 def _extract_gemini_error(body: str) -> str:
@@ -471,49 +440,20 @@ def _extract_gemini_error(body: str) -> str:
     return body[:500]
 
 
-def _extract_openai_compatible_error(body: str) -> str:
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        return body[:500]
-
-    error = data.get("error")
-    if isinstance(error, dict):
-        message = error.get("message")
-        if message:
-            return str(message)
-    if isinstance(error, str):
-        return error
-    return body[:500]
-
-
 def _split_provider_model(raw_model: str, provider_mode: str) -> tuple[str | None, str]:
     model = raw_model.strip()
     if ":" in model:
         prefix, candidate = model.split(":", 1)
-        if prefix in {"gemini", "groq"}:
+        if prefix == "gemini":
             return prefix, candidate
+        return None, candidate
 
-    if provider_mode in {"gemini", "groq"}:
+    if provider_mode == "gemini":
         return provider_mode, model
 
-    if model.startswith("models/gemini") or model.startswith("gemini-"):
+    if provider_mode == "auto" or model.startswith("models/gemini") or model.startswith("gemini-"):
         return "gemini", model
-    if model.startswith(
-        (
-            "llama-",
-            "qwen/",
-            "meta-llama/",
-            "openai/",
-            "deepseek/",
-            "mixtral-",
-            "compound-",
-        )
-    ):
-        return "groq", model
-    if "/" in model:
-        return "groq", model
-    return "gemini", model
+    return None, model
 
 
 def _normalize_chat_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:

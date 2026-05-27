@@ -19,50 +19,48 @@ from toolgen.models import APIEndpoint, Message, ToolCall
 
 logger = logging.getLogger(__name__)
 
+_MAX_TOOL_PARAMS = 8
+_MAX_HISTORY_MESSAGES = 8
+_MAX_SESSION_CONTEXT_CHARS = 1200
+_MAX_TOOL_RESULT_CHARS = 700
+_MAX_VISIBLE_RESPONSE_CHARS = 320
+
 
 def _build_tool_descriptions(available_tools: list[APIEndpoint]) -> str:
-    """Format available tools for the system prompt."""
+    """Format available tools compactly for the system prompt."""
     descriptions = []
     for ep in available_tools:
-        params = []
-        for p in ep.parameters:
-            req = " (REQUIRED)" if p.required else ""
-            default = f", default={p.default}" if p.default is not None else ""
-            params.append(f"    - {p.name}: {p.type.value}{req}{default} — {p.description}")
-
-        params_text = "\n".join(params) if params else "    (no parameters)"
+        params = [_format_parameter(p) for p in ep.parameters[:_MAX_TOOL_PARAMS]]
+        if len(ep.parameters) > _MAX_TOOL_PARAMS:
+            params.append(f"+{len(ep.parameters) - _MAX_TOOL_PARAMS} more")
+        params_text = ", ".join(params) if params else "none"
         descriptions.append(
-            f"  {ep.endpoint_id} [{ep.method.value}]\n"
-            f"    Description: {ep.description or 'No description'}\n"
-            f"    Parameters:\n{params_text}"
+            f"- {ep.endpoint_id} [{ep.method.value}]: "
+            f"{_shorten(ep.description or 'No description', 130)}; args: {params_text}"
         )
 
-    return "\n\n".join(descriptions)
+    return "\n".join(descriptions)
 
 
 _ASSISTANT_SYSTEM_TEMPLATE = """\
-You are a helpful AI assistant with access to tools. Your job is to help the \
-user accomplish their task by calling the right tools at the right time.
-
+You are a concise tool-using assistant.
 Available tools:
 {tools}
 
-At each turn, you must decide one of three actions:
-1. ASK a clarifying question if the user's request is ambiguous or missing required info
-2. CALL a tool if you have enough info to proceed
-3. RESPOND with a final answer after tools have returned results
+Choose one action each turn:
+- Ask one short clarifying question if required info is missing.
+- Call a tool when ready.
+- Answer after results arrive.
 
-For tool calls, respond with EXACTLY this JSON format (no other text):
+Tool calls must be exactly this JSON and no prose:
 {{"action": "tool_call", "endpoint": "tool_name/endpoint_name", "arguments": {{"param": "value"}}}}
 
-For clarifying questions or final answers, respond with natural text only.
-
 Rules:
-- ALWAYS check if required parameters are available before calling a tool
-- If required info is missing, ASK the user — don't guess or hallucinate values
-- When you receive tool results, summarize them naturally for the user
-- Use IDs and data from previous tool results — don't make up fake values
-- Be concise and helpful
+- Required args are marked required; ask instead of guessing.
+- Use IDs/data from previous results; never invent them.
+- Never mention tool names, endpoint names, API names, or internal identifiers in
+  user-facing text.
+- Keep user-facing prose under 2 sentences and 45 words.
 """
 
 
@@ -86,13 +84,13 @@ def generate_assistant_turn(
     # Add session context if available (for grounding)
     if session_context:
         system_instruction += (
-            f"\n\nSession context (results from previous tool calls):\n"
-            f"{json.dumps(session_context, indent=2, default=str)}"
+            "\n\nSession context:\n"
+            f"{_compact_json(session_context, _MAX_SESSION_CONTEXT_CHARS)}"
         )
 
     # Build message history for the LLM
     messages = []
-    for msg in conversation_history:
+    for msg in _trim_history(conversation_history):
         if msg.role == "user":
             messages.append({"role": "user", "content": msg.content or ""})
         elif msg.role == "assistant":
@@ -110,11 +108,9 @@ def generate_assistant_turn(
                 })
         elif msg.role == "tool":
             content = msg.content
-            if isinstance(content, dict):
-                content = json.dumps(content, default=str)
             messages.append({
                 "role": "user",
-                "content": f"[Tool Result]: {content}",
+                "content": f"[Tool result] {_compact_json(content, _MAX_TOOL_RESULT_CHARS)}",
             })
 
     if not messages:
@@ -140,7 +136,49 @@ def generate_assistant_turn(
         return None, tool_call
 
     # Otherwise it's a text response
-    return text, None
+    return _shorten_visible_response(text), None
+
+
+def _format_parameter(parameter: Any) -> str:
+    required = " required" if parameter.required else ""
+    default = f"={parameter.default}" if parameter.default is not None else ""
+    return f"{parameter.name}:{parameter.type.value}{required}{default}"
+
+
+def _trim_history(conversation_history: list[Message]) -> list[Message]:
+    selected = conversation_history[-_MAX_HISTORY_MESSAGES:]
+    first_user = next((msg for msg in conversation_history if msg.role == "user"), None)
+    if first_user and all(msg is not first_user for msg in selected):
+        selected = [first_user, *selected[-(_MAX_HISTORY_MESSAGES - 1):]]
+    return selected
+
+
+def _compact_json(value: Any, max_chars: int) -> str:
+    if isinstance(value, str):
+        return _shorten(value, max_chars)
+    try:
+        text = json.dumps(value, default=str, separators=(",", ":"))
+    except TypeError:
+        text = str(value)
+    return _shorten(text, max_chars)
+
+
+def _shorten_visible_response(text: str) -> str:
+    return _shorten(text.strip(), _MAX_VISIBLE_RESPONSE_CHARS)
+
+
+def _shorten(text: str, max_chars: int) -> str:
+    normalized = " ".join(str(text).split())
+    if len(normalized) <= max_chars:
+        return normalized
+    boundary = max(
+        normalized.rfind(". ", 0, max_chars),
+        normalized.rfind("? ", 0, max_chars),
+        normalized.rfind("! ", 0, max_chars),
+    )
+    if boundary >= max_chars // 2:
+        return normalized[: boundary + 1]
+    return normalized[: max_chars - 3].rstrip() + "..."
 
 
 def _try_parse_tool_call(

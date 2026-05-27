@@ -44,7 +44,7 @@ flowchart TB
     Output --> Dashboard["Trace dashboard"]
 
     Steering["Diversity steering"] -. "coverage pressure" .-> Sampler
-    LiveLLM["Gemini / Groq"] -. "optional live calls" .-> Orchestrator
+    LiveLLM["Gemini live client"] -. "optional live calls" .-> Orchestrator
     LiveLLM -. "optional live judge" .-> Judge
 ```
 
@@ -121,13 +121,16 @@ flowchart LR
     Chat --> Calls["Assistant tool calls"]
     Calls --> Mock["Mock tool outputs"]
     Mock --> Grounding["Grounded follow-up calls"]
-    Grounding --> Scores["Judge scores"]
+    Grounding --> StepTrace["Trace-first step audit"]
+    StepTrace --> Scores["Judge scores"]
     Scores --> Final["Final JSONL output"]
 ```
 
 The graph chooses a plausible path. The planner turns that path into a scenario. The
 orchestrator keeps the conversation on track. The executor creates fake API responses
-and remembers IDs so later calls can use them. The judge scores the final trace.
+and remembers IDs so later calls can use them. The step trace records observable
+reasoning facts: the tool goal, dependencies, argument sources, and returned reference
+ids. The judge scores the final trace.
 
 ## Key Design Decisions
 
@@ -235,6 +238,33 @@ Roles:
 This division keeps creativity bounded by the sampled graph. The assistant sees only
 the relevant chain tools, not the entire registry, which reduces invalid calls.
 
+Trace-first reasoning is the core safety choice: the system owns the tool path and
+argument provenance, while the LLM mainly supplies natural language and live tool
+decisions when enabled. This avoids relying on hidden chain-of-thought. Each
+conversation exposes a `step_trace` such as:
+
+```json
+{
+  "step": 2,
+  "endpoint": "hotel_api/book_hotel",
+  "goal": "Step 2/3: Book a hotel room",
+  "depends_on": ["hotel_api/search_hotels"],
+  "argument_sources": {
+    "hotel_id": {
+      "source": "previous_tool_result",
+      "evidence": "matched $.results[0].id from hotel_api/search_hotels"
+    },
+    "check_in": {
+      "source": "user_request",
+      "evidence": "value appeared in a prior user message"
+    }
+  },
+  "output_refs": {
+    "$.confirmation_id": "bk_708b"
+  }
+}
+```
+
 Generation sequence:
 
 ```mermaid
@@ -245,6 +275,7 @@ sequenceDiagram
     participant UserSim as User simulator
     participant Assistant
     participant Executor
+    participant StepTrace as Step trace
     participant Judge
     participant Repairer
 
@@ -259,6 +290,7 @@ sequenceDiagram
         Assistant-->>Pipeline: clarify or tool_call
         Pipeline->>Executor: execute endpoint with arguments
         Executor-->>Pipeline: mock response + session state
+        Pipeline->>StepTrace: record goal, deps, arg sources, refs
         Pipeline->>UserSim: follow-up or acknowledgement
     end
     Pipeline->>Judge: score completed trace
@@ -303,25 +335,26 @@ flowchart LR
 The system supports four useful modes:
 
 - `offline`: deterministic generator and heuristic judge
-- `auto`: use Gemini/Groq when keys exist, otherwise fall back
+- `auto`: use Gemini when a key exists, otherwise fall back
 - `full` live profile: planner, user simulator, assistant decisions, assistant
   summaries, and judge are live
 - `hybrid` live profile: planner, assistant tool decisions, and judge are live;
   user turns and tool-result summaries are deterministic to reduce quota usage
 - strict live: fail instead of falling back when `TOOLGEN_REQUIRE_LIVE_LLM=true`
 
-Model pools are configurable and randomized per request. This helps use multiple model
-classes without tying the code to one provider. Smaller fast models are reasonable for
-judging and simple user turns; stronger models are better for scenario planning and
-assistant behavior when quota allows.
+Model pools remain configurable for experiments, but the submission path keeps
+randomization off and routes every live role through `gemini-3.1-flash-lite`. That
+keeps behavior explainable and avoids spending time debugging provider-specific
+permission failures during the assessment run.
 
 The `hybrid` profile is the quota-conscious option. It still asks the assistant to make
 step-by-step tool decisions after seeing context, but removes the least valuable live
 calls: user-simulator follow-ups and assistant summaries after every tool result.
 
-The Groq `llama-3.1-8b-instant` class is attractive for cost and request limits, but it
-is best used for judging, repair checks, or lightweight turns. For richer generation,
-a stronger model is safer when quota is available.
+Parallel generation is conversation-level, not turn-level. Each worker owns a fresh
+mock executor and role-specific LLM clients, while all live clients share one
+thread-safe rate limiter. This preserves the order inside each conversation and avoids
+turn interleaving, while allowing network waits from different conversations to overlap.
 
 Model and config routing:
 
@@ -333,12 +366,10 @@ flowchart TD
     D --> E["code defaults"]
     A --> F{"Provider"}
     F -->|offline| G["deterministic generator + heuristic judge"]
-    F -->|groq| H["Groq chat completions"]
     F -->|gemini| I["Gemini REST generateContent"]
-    F -->|auto| J["available keyed providers"]
-    H --> K["llama-3.1-8b-instant or configured pool"]
-    I --> L["Gemini configured model or pool"]
-    J --> M["provider-aware model pool"]
+    F -->|auto| J["Gemini when GEMINI_API_KEY is present"]
+    I --> L["gemini-3.1-flash-lite"]
+    J --> L
 ```
 
 Live call budget:
@@ -351,6 +382,25 @@ flowchart LR
     Hybrid --> HC["planner + assistant decisions + judge"]
     FC --> FCost["about 3T + 2 calls"]
     HC --> HCost["about T + 2 calls"]
+```
+
+Parallel worker model:
+
+```mermaid
+flowchart TB
+    Queue["Sampled conversation tasks"] --> W1["Worker 1"]
+    Queue --> W2["Worker 2"]
+    Queue --> WN["Worker N"]
+    W1 --> E1["Private mock executor"]
+    W2 --> E2["Private mock executor"]
+    WN --> EN["Private mock executor"]
+    W1 --> R["Shared RPM limiter"]
+    W2 --> R
+    WN --> R
+    R --> LLM["Gemini API"]
+    W1 --> Out["Ordered JSONL rewrite"]
+    W2 --> Out
+    WN --> Out
 ```
 
 ## Evaluation Strategy

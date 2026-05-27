@@ -25,30 +25,16 @@ from toolgen.models import (
 logger = logging.getLogger(__name__)
 
 _JUDGE_SYSTEM_INSTRUCTION = """\
-You are an expert evaluator of AI assistant conversations. You score conversations \
-on three dimensions, each from 1.0 to 5.0.
+Score the conversation from 1.0 to 5.0 for:
+- tool_correctness: valid calls, args, and ID grounding
+- naturalness: realistic chat flow and clarification
+- task_completion: user goal completed with clear confirmation
 
-Dimensions:
-1. TOOL_CORRECTNESS (1-5): Are tool calls valid and properly formed?
-   - 5: All tool calls use correct endpoints, proper argument types, and IDs chain perfectly
-   - 3: Most calls correct, minor argument issues
-   - 1: Wrong endpoints, hallucinated IDs, broken chains
-
-2. NATURALNESS (1-5): Does the conversation feel like a real human-AI interaction?
-   - 5: Completely natural flow, realistic disambiguation, appropriate tone
-   - 3: Somewhat natural but with awkward transitions or unnatural language
-   - 1: Robotic, repetitive, or clearly synthetic
-
-3. TASK_COMPLETION (1-5): Was the user's goal fully accomplished?
-   - 5: Goal fully achieved, all necessary tools called, clear confirmation
-   - 3: Partially achieved, some steps missing or incomplete
-   - 1: Goal not addressed, conversation went off-track
-
-You MUST respond with ONLY valid JSON in this exact format:
+Return only valid JSON. Keep each rationale under 12 words:
 {
-  "tool_correctness": {"score": 4.5, "rationale": "explanation..."},
-  "naturalness": {"score": 4.0, "rationale": "explanation..."},
-  "task_completion": {"score": 5.0, "rationale": "explanation..."}
+  "tool_correctness": {"score": 4.5, "rationale": "brief reason"},
+  "naturalness": {"score": 4.0, "rationale": "brief reason"},
+  "task_completion": {"score": 5.0, "rationale": "brief reason"}
 }
 """
 
@@ -58,23 +44,19 @@ def _format_conversation_for_judge(conversation: Conversation) -> str:
     lines = []
     for msg in conversation.messages:
         if msg.role == "user":
-            lines.append(f"USER: {msg.content}")
+            lines.append(f"USER: {_shorten(str(msg.content), 300)}")
         elif msg.role == "assistant":
             if msg.content:
-                lines.append(f"ASSISTANT: {msg.content}")
+                lines.append(f"ASSISTANT: {_shorten(str(msg.content), 300)}")
             if msg.tool_calls:
                 for tc in msg.tool_calls:
-                    lines.append(
-                        f"ASSISTANT [TOOL CALL]: {tc.endpoint}({json.dumps(tc.arguments)})"
-                    )
+                    args = json.dumps(tc.arguments, separators=(",", ":"), default=str)
+                    lines.append(f"ASSISTANT TOOL CALL: {tc.endpoint}({args})")
         elif msg.role == "tool":
             content = msg.content
             if isinstance(content, dict):
-                content = json.dumps(content, default=str)
-            # Truncate very long tool results
-            if isinstance(content, str) and len(content) > 500:
-                content = content[:500] + "..."
-            lines.append(f"TOOL RESULT: {content}")
+                content = json.dumps(content, default=str, separators=(",", ":"))
+            lines.append(f"TOOL RESULT: {_shorten(str(content), 300)}")
 
     return "\n".join(lines)
 
@@ -101,17 +83,16 @@ def score_conversation(
     formatted = _format_conversation_for_judge(conversation)
 
     metadata_summary = (
-        f"Tools used: {', '.join(conversation.metadata.tools_used)}\n"
-        f"Total turns: {conversation.metadata.num_turns}\n"
-        f"Tool calls: {conversation.metadata.num_tool_calls}\n"
-        f"Pattern: {conversation.metadata.pattern}"
+        f"tools={','.join(conversation.metadata.tools_used)}; "
+        f"turns={conversation.metadata.num_turns}; "
+        f"calls={conversation.metadata.num_tool_calls}; "
+        f"pattern={conversation.metadata.pattern}"
     )
 
     prompt = (
-        f"Score the following conversation:\n\n"
-        f"--- CONVERSATION ---\n{formatted}\n--- END ---\n\n"
-        f"Metadata:\n{metadata_summary}\n\n"
-        f"Score this conversation on all three dimensions."
+        f"Conversation:\n{formatted}\n\n"
+        f"Metadata: {metadata_summary}\n"
+        "Score all three dimensions."
     )
 
     response = judge_client.generate_json(
@@ -256,6 +237,13 @@ def _parse_judge_response(parsed: dict[str, Any]) -> JudgeScores:
         naturalness=_extract_score(parsed.get("naturalness", 3.0)),
         task_completion=_extract_score(parsed.get("task_completion", 3.0)),
     )
+
+
+def _shorten(text: str, max_chars: int) -> str:
+    normalized = " ".join(str(text).split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 3].rstrip() + "..."
 
 
 def _fallback_scores() -> JudgeScores:

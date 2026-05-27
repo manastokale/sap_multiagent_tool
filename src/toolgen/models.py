@@ -236,6 +236,32 @@ class ToolCall(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class ArgumentSource(BaseModel):
+    """Auditable source for one tool-call argument."""
+
+    source: str = "unknown"
+    value: Any = None
+    evidence: str = ""
+    source_endpoint: str | None = None
+
+
+class ToolStepTrace(BaseModel):
+    """Trace-first reasoning metadata for one tool step.
+
+    This is not hidden chain-of-thought. It records observable planning facts:
+    which endpoint was used, what earlier tool calls it depends on, where each
+    argument came from, and which reference ids the tool returned.
+    """
+
+    step: int
+    endpoint: str
+    goal: str = ""
+    depends_on: list[str] = Field(default_factory=list)
+    argument_sources: dict[str, ArgumentSource] = Field(default_factory=dict)
+    output_refs: dict[str, Any] = Field(default_factory=dict)
+    status: str = "ok"
+
+
 class Message(BaseModel):
     """A single message in a conversation."""
 
@@ -309,6 +335,7 @@ class Conversation(BaseModel):
 
     conversation_id: str = ""
     messages: list[Message] = Field(default_factory=list)
+    step_trace: list[ToolStepTrace] = Field(default_factory=list)
     judge_scores: JudgeScores | None = None
     metadata: ConversationMetadata = Field(default_factory=ConversationMetadata)
 

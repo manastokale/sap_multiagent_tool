@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import json
+import random
 
 from toolgen.agents.llm_client import LLMResponse
-from toolgen.agents.orchestrator import generate_conversation
+from toolgen.agents.orchestrator import generate_conversation, _hybrid_user_response
 from toolgen.executor.mock_executor import MockExecutor
+from toolgen.models import (
+    APIEndpoint,
+    ChainPattern,
+    HTTPMethod,
+    Parameter,
+    ParameterType,
+    ScenarioPlan,
+    ToolChain,
+)
 
 
 class FakeLiveClient:
@@ -66,12 +76,46 @@ def test_hybrid_live_skips_user_and_summary_llm_calls(sample_chain):
 
     assert conversation.metadata.generation_profile == "hybrid"
     assert conversation.metadata.num_tool_calls == len(sample_chain.endpoint_ids)
+    assert len(conversation.step_trace) == len(sample_chain.endpoint_ids)
     assert client.json_calls == 1
     assert client.history_calls == len(sample_chain.endpoint_ids)
     assert client.free_text_calls == 0
     assert any(
         msg.role == "assistant"
         and isinstance(msg.content, str)
-        and "received the result" in msg.content
+        and "reference" in msg.content
         for msg in conversation.messages
     )
+
+
+def test_hybrid_user_supplies_required_ids_when_asked():
+    endpoint = APIEndpoint(
+        tool_name="payment_api",
+        endpoint_name="create_payment",
+        description="Create a payment for an order",
+        method=HTTPMethod.POST,
+        category="Commerce",
+        parameters=[
+            Parameter(name="order_id", type=ParameterType.STRING, required=True),
+            Parameter(name="currency", type=ParameterType.STRING, required=True),
+        ],
+    )
+    chain = ToolChain(endpoints=[endpoint], pattern=ChainPattern.SINGLE_STEP)
+    plan = ScenarioPlan(
+        scenario="The user needs to pay for an order.",
+        user_persona="Concise shopper.",
+        expected_tool_sequence=[endpoint.endpoint_id],
+        disambiguation_points=["order_id", "currency"],
+        complexity="single_step",
+    )
+
+    response = _hybrid_user_response(
+        plan,
+        chain,
+        num_tool_calls_made=0,
+        rng=random.Random(7),
+        latest_assistant_text="What order ID and currency should I use?",
+    )
+
+    assert "order number is order_" in response.lower()
+    assert "Please use USD" in response

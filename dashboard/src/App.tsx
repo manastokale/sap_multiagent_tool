@@ -42,6 +42,23 @@ type ToolCall = {
   arguments: Record<string, unknown>;
 };
 
+type ArgumentSource = {
+  source?: string;
+  value?: unknown;
+  evidence?: string;
+  source_endpoint?: string | null;
+};
+
+type ToolStepTrace = {
+  step: number;
+  endpoint: string;
+  goal?: string;
+  depends_on?: string[];
+  argument_sources?: Record<string, ArgumentSource>;
+  output_refs?: Record<string, unknown>;
+  status?: string;
+};
+
 type Message = {
   role: Role;
   content: string | Record<string, unknown> | null;
@@ -89,6 +106,7 @@ type Metadata = {
 type Conversation = {
   conversation_id: string;
   messages: Message[];
+  step_trace?: ToolStepTrace[];
   judge_scores?: JudgeScores;
   metadata?: Metadata;
 };
@@ -166,6 +184,7 @@ type TraceEvent = {
   previousEndpoint?: string;
   relation?: Edge;
   groundedArgs?: string[];
+  stepTrace?: ToolStepTrace;
   score?: number;
   payload: Record<string, unknown>;
 };
@@ -754,6 +773,7 @@ function TracePane({
                   value={selectedEvent.groundedArgs?.join(', ') || 'none detected'}
                 />
                 <CodeBlock title="Tool Arguments / Request" value={selectedEvent.args ?? selectedEvent.payload} />
+                <CodeBlock title="Trace-First Reasoning" value={selectedEvent.stepTrace ?? {}} />
                 <CodeBlock title="Endpoint Parameters" value={endpoint?.parameters ?? []} />
               </Stack>
             )}
@@ -1069,6 +1089,7 @@ function buildTraceEvents(conversation: Conversation, edgeMap: Map<string, Edge>
   const events: TraceEvent[] = [];
   const priorToolValues: string[] = [];
   let previousEndpoint: string | undefined;
+  let toolTraceIndex = 0;
   let order = 1;
 
   conversation.messages.forEach((message, turnIndex) => {
@@ -1112,6 +1133,10 @@ function buildTraceEvents(conversation: Conversation, edgeMap: Map<string, Edge>
         const groundedArgs = argValues.filter((value) => priorToolValues.includes(value));
         const response = followingTools[callIndex]?.content ?? followingTools[0]?.content ?? null;
         const relation = previousEndpoint ? edgeMap.get(edgeKey(previousEndpoint, call.endpoint)) : undefined;
+        const stepTrace =
+          conversation.step_trace?.[toolTraceIndex] ??
+          conversation.step_trace?.find((step) => step.endpoint === call.endpoint);
+        toolTraceIndex += 1;
         events.push({
           id: `${conversation.conversation_id}-${turnIndex}-tool-call-${callIndex}`,
           turnIndex,
@@ -1130,6 +1155,7 @@ function buildTraceEvents(conversation: Conversation, edgeMap: Map<string, Edge>
           previousEndpoint,
           relation,
           groundedArgs,
+          stepTrace,
           payload: {
             role: message.role,
             endpoint: call.endpoint,
@@ -1137,6 +1163,7 @@ function buildTraceEvents(conversation: Conversation, edgeMap: Map<string, Edge>
             grounded_args: groundedArgs,
             previous_endpoint: previousEndpoint,
             graph_relation: relation,
+            step_trace: stepTrace,
           },
         });
         previousEndpoint = call.endpoint;

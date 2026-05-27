@@ -4,6 +4,7 @@ import pytest
 
 from toolgen.models import (
     APIEndpoint,
+    ArgumentSource,
     Conversation,
     HTTPMethod,
     JudgeScore,
@@ -12,6 +13,7 @@ from toolgen.models import (
     Parameter,
     ParameterType,
     ToolChain,
+    ToolStepTrace,
 )
 
 
@@ -129,6 +131,17 @@ class TestConversation:
                 Message(role="user", content="Hello"),
                 Message(role="assistant", content="Hi there!"),
             ],
+            step_trace=[
+                ToolStepTrace(
+                    step=1,
+                    endpoint="hotel/search",
+                    goal="Find hotels",
+                    argument_sources={
+                        "city": ArgumentSource(source="user_request", value="Paris")
+                    },
+                    output_refs={"$.results[0].id": "hotel_123"},
+                )
+            ],
             judge_scores=JudgeScores(
                 tool_correctness=JudgeScore(score=4.5),
                 naturalness=JudgeScore(score=4.0),
@@ -138,5 +151,6 @@ class TestConversation:
         d = conv.to_output_dict()
         assert d["conversation_id"] == "conv_0001"
         assert len(d["messages"]) == 2
+        assert d["step_trace"][0]["argument_sources"]["city"]["source"] == "user_request"
         assert "overall" in d["judge_scores"]
         assert d["judge_scores"]["overall"] == 4.5

@@ -20,24 +20,21 @@ from toolgen.models import (
 logger = logging.getLogger(__name__)
 
 _PLANNER_SYSTEM_INSTRUCTION = """\
-You are a scenario planner for synthetic conversation generation.
-Your job is to create realistic user scenarios that exercise specific API tools.
+Create compact scenario plans for synthetic tool-use chats.
 
-You MUST output valid JSON matching this exact schema:
+Return only valid JSON:
 {
-  "scenario": "A 1-2 sentence description of the user's goal",
-  "user_persona": "Brief description of the user's personality and communication style",
+  "scenario": "1 short sentence in ordinary user language",
+  "user_persona": "brief user style",
   "expected_tool_sequence": ["tool/endpoint1", "tool/endpoint2", ...],
-  "disambiguation_points": ["What info is missing that the assistant should ask about"],
+  "disambiguation_points": ["missing detail to ask about"],
   "complexity": "one of: single_step, multi_step, multi_step_with_disambiguation"
 }
 
 Rules:
-- The scenario must be realistic and natural — something a real person would ask
-- Include 1-2 disambiguation points where the user's request is vague
-- The persona should influence how the user communicates (formal, casual, impatient, etc.)
-- The expected_tool_sequence should match the tools provided
-- Vary complexity: some scenarios should be straightforward, others complex
+- Keep scenario/persona/disambiguation concise.
+- expected_tool_sequence must match the provided tools.
+- Do not mention API/tool/endpoint names or raw parameter names in user-facing fields.
 """
 
 
@@ -51,17 +48,15 @@ def plan_scenario(
 
     This is the key structured-output agent in the system.
     """
-    # Build the tool description for the prompt
     tool_descriptions = []
     for ep in chain.endpoints:
         params = ", ".join(
-            f"{p.name}: {p.type.value}" + (" (required)" if p.required else "")
+            f"{p.name}:{p.type.value}" + (" required" if p.required else "")
             for p in ep.parameters
         )
         tool_descriptions.append(
-            f"- {ep.endpoint_id}: {ep.description or 'No description'}\n"
-            f"  Method: {ep.method.value}\n"
-            f"  Parameters: {params or 'none'}"
+            f"- {ep.endpoint_id}: {_shorten(ep.description or 'No description', 120)}; "
+            f"args: {params or 'none'}"
         )
 
     tools_text = "\n".join(tool_descriptions)
@@ -74,20 +69,19 @@ def plan_scenario(
         ) if steering.avoid_tool_combinations else "none"
         prefer = ", ".join(steering.prefer_domains) if steering.prefer_domains else "none"
         steering_text = (
-            f"\nDiversity guidance:\n"
-            f"- Avoid similar scenarios to: {steering.rationale}\n"
-            f"- Avoid tool combinations: {avoid}\n"
-            f"- Prefer domains: {prefer}\n"
-            f"- Complexity suggestion: {steering.complexity_suggestion or 'vary'}\n"
+            "\nDiversity guidance:\n"
+            f"avoid similar: {_shorten(steering.rationale, 160)}\n"
+            f"avoid combos: {avoid}\n"
+            f"prefer domains: {prefer}\n"
+            f"complexity: {steering.complexity_suggestion or 'vary'}\n"
         )
 
     prompt = (
-        f"Create a realistic scenario plan for a conversation that uses these tools:\n\n"
-        f"{tools_text}\n\n"
-        f"The conversation pattern is: {chain.pattern.value}\n"
-        f"Categories involved: {', '.join(chain.categories)}\n"
+        f"Tools:\n{tools_text}\n"
+        f"Pattern: {chain.pattern.value}\n"
+        f"Categories: {', '.join(chain.categories)}\n"
         f"{steering_text}\n"
-        f"Generate the scenario plan as JSON."
+        "Generate the compact scenario plan."
     )
 
     response = client.generate_json(
@@ -126,3 +120,10 @@ def _fallback_plan(chain: ToolChain) -> ScenarioPlan:
         disambiguation_points=["specific preferences", "date or time constraints"],
         complexity="multi_step" if len(tools) > 1 else "single_step",
     )
+
+
+def _shorten(text: str, max_chars: int) -> str:
+    normalized = " ".join(str(text).split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 3].rstrip() + "..."

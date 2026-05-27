@@ -32,20 +32,10 @@ def _default_project_root() -> Path:
 _PROJECT_ROOT = _default_project_root()
 _ENV_FILE = _PROJECT_ROOT / ".env"
 
-DEFAULT_GENERATION_MODEL = "gemini-2.5-flash"
-DEFAULT_JUDGE_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_GEMINI_GENERATION_MODEL_POOL = (
-    "gemini-3.1-flash-lite,"
-    "gemini-2.5-flash,"
-    "gemini-2.5-flash-lite"
-)
-DEFAULT_GEMINI_JUDGE_MODEL_POOL = "gemini-2.5-flash-lite,gemini-3.1-flash-lite"
-DEFAULT_GROQ_GENERATION_MODEL_POOL = (
-    "llama-3.1-8b-instant,"
-    "llama-3.3-70b-versatile,"
-    "qwen/qwen3-32b"
-)
-DEFAULT_GROQ_JUDGE_MODEL_POOL = "llama-3.1-8b-instant,qwen/qwen3-32b"
+DEFAULT_GENERATION_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_JUDGE_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_GEMINI_GENERATION_MODEL_POOL = "gemini-3.1-flash-lite"
+DEFAULT_GEMINI_JUDGE_MODEL_POOL = "gemini-3.1-flash-lite"
 
 
 def parse_model_pool(value: str | list[str] | tuple[str, ...]) -> list[str]:
@@ -80,7 +70,7 @@ class ToolGenSettings(BaseSettings):
     groq_api_key: str = Field(
         default="",
         alias="GROQ_API_KEY",
-        description="Groq API key for LLM calls",
+        description="Unused compatibility key; retained so existing .env files do not break",
     )
 
     # --- Optional model hints commonly copied from other projects ---
@@ -96,8 +86,8 @@ class ToolGenSettings(BaseSettings):
 
     # --- Model selection ---
     llm_provider: str = Field(
-        default="auto",
-        description="LLM provider: 'auto', 'offline', 'gemini', or 'groq'",
+        default="gemini",
+        description="LLM provider: 'gemini', 'auto', or 'offline'. Auto resolves to Gemini.",
     )
     generation_model: str = Field(
         default=DEFAULT_GENERATION_MODEL,
@@ -108,7 +98,7 @@ class ToolGenSettings(BaseSettings):
         description="Model for LLM-as-judge scoring (cheaper, simpler task)",
     )
     randomize_models: bool = Field(
-        default=True,
+        default=False,
         description="Randomly pick from the configured provider-aware model pools per request",
     )
     generation_model_pool: str = Field(
@@ -119,12 +109,44 @@ class ToolGenSettings(BaseSettings):
         default="",
         description="Comma-separated judge models used when randomize_models is true",
     )
+    planner_model: str = Field(
+        default="",
+        description="Optional model override for scenario planning",
+    )
+    planner_model_pool: str = Field(
+        default="",
+        description="Comma-separated planner models used when randomize_models is true",
+    )
+    assistant_model: str = Field(
+        default="",
+        description="Optional model override for assistant tool-decision turns",
+    )
+    assistant_model_pool: str = Field(
+        default="",
+        description="Comma-separated assistant models used when randomize_models is true",
+    )
+    user_model: str = Field(
+        default="",
+        description="Optional model override for live user-simulator turns",
+    )
+    user_model_pool: str = Field(
+        default="",
+        description="Comma-separated user-simulator models used when randomize_models is true",
+    )
+    summary_model: str = Field(
+        default="",
+        description="Optional model override for live assistant summary turns",
+    )
+    summary_model_pool: str = Field(
+        default="",
+        description="Comma-separated summary models used when randomize_models is true",
+    )
     require_live_llm: bool = Field(
         default=False,
         description="Fail instead of using offline or heuristic fallbacks for LLM generation/judging",
     )
     live_profile: str = Field(
-        default="full",
+        default="hybrid",
         description="Live orchestration profile: 'full' or 'hybrid'",
     )
 
@@ -163,10 +185,18 @@ class ToolGenSettings(BaseSettings):
 
     # --- Rate limiting ---
     llm_requests_per_minute: int = Field(
-        default=30, description="Rate limit for LLM API calls"
+        default=10, description="Rate limit for LLM API calls"
     )
     llm_request_timeout_seconds: int = Field(
         default=30, description="Timeout for a single LLM API request"
+    )
+    llm_max_output_tokens: int = Field(
+        default=512,
+        description="Maximum tokens requested from the live LLM per response",
+    )
+    max_parallel_conversations: int = Field(
+        default=2,
+        description="Maximum conversations to generate or evaluate concurrently",
     )
 
     @classmethod
@@ -205,18 +235,15 @@ class ToolGenSettings(BaseSettings):
         provider = self.llm_provider.strip().lower()
         if provider in {"offline", "local", "deterministic"}:
             return False
-        if provider == "gemini":
+        if provider in {"auto", "gemini"}:
             return bool(self.gemini_api_key)
-        if provider == "groq":
-            return bool(self.groq_api_key)
-        return bool(self.gemini_api_key or self.groq_api_key)
+        return False
 
     @property
     def api_keys(self) -> dict[str, str]:
-        """Provider API keys, with empty values preserved for diagnostics."""
+        """Active provider API keys, with empty values preserved for diagnostics."""
         return {
             "gemini": self.gemini_api_key,
-            "groq": self.groq_api_key,
         }
 
     @property
@@ -236,6 +263,30 @@ class ToolGenSettings(BaseSettings):
         if not self.randomize_models:
             return [self.judge_model]
         return self._models_for_role("judge")
+
+    @property
+    def planner_models(self) -> list[str]:
+        """Models used for scenario planning."""
+        return self._agent_models_for_role("planner")
+
+    @property
+    def assistant_models(self) -> list[str]:
+        """Models used for assistant tool-call decisions."""
+        return self._agent_models_for_role("assistant")
+
+    @property
+    def user_models(self) -> list[str]:
+        """Models used for live user simulator turns."""
+        return self._agent_models_for_role("user")
+
+    @property
+    def summary_models(self) -> list[str]:
+        """Models used for live assistant summaries after tool calls."""
+        return self._agent_models_for_role("summary")
+
+    @property
+    def normalized_max_parallel_conversations(self) -> int:
+        return max(1, int(self.max_parallel_conversations))
 
     @property
     def normalized_live_profile(self) -> str:
@@ -268,18 +319,24 @@ class ToolGenSettings(BaseSettings):
                     else DEFAULT_GEMINI_JUDGE_MODEL_POOL
                 )
             )
-        if provider in {"auto", "groq"} and self.groq_api_key:
-            models.extend(
-                parse_model_pool(
-                    DEFAULT_GROQ_GENERATION_MODEL_POOL
-                    if role == "generation"
-                    else DEFAULT_GROQ_JUDGE_MODEL_POOL
-                )
-            )
         deduped = parse_model_pool(models)
         if deduped:
             return deduped
         return [self.generation_model if role == "generation" else self.judge_model]
+
+    def _agent_models_for_role(self, role: str) -> list[str]:
+        if self.use_offline_llm:
+            return ["offline-deterministic"]
+
+        pool = parse_model_pool(getattr(self, f"{role}_model_pool", ""))
+        if self.randomize_models and pool:
+            return pool
+
+        role_model = getattr(self, f"{role}_model", "")
+        if isinstance(role_model, str) and role_model.strip():
+            return [role_model.strip()]
+
+        return self.generation_models
 
     def _explicit_model_for_role(self, role: str) -> str:
         """Return a model explicitly set by env/overrides, ignoring class defaults."""

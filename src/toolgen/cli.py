@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import threading
 from pathlib import Path
 
 import click
@@ -96,11 +98,18 @@ def show_config() -> None:
     table.add_row("Live profile", settings.normalized_live_profile)
     table.add_row("Randomize models", str(settings.randomize_models))
     table.add_row("Generation models", _format_models(settings.generation_models))
+    table.add_row("Planner models", _format_models(settings.planner_models))
+    table.add_row("Assistant models", _format_models(settings.assistant_models))
+    table.add_row("User simulator models", _format_models(settings.user_models))
+    table.add_row("Summary models", _format_models(settings.summary_models))
     table.add_row("Judge models", _format_models(settings.judge_models))
+    table.add_row("Parallel conversations", str(settings.normalized_max_parallel_conversations))
+    table.add_row("Max turns/conversation", str(settings.max_turns_per_conversation))
+    table.add_row("LLM max output tokens", str(settings.llm_max_output_tokens))
     table.add_row("Require live LLM", str(settings.require_live_llm))
     table.add_row("Requests/minute", str(settings.llm_requests_per_minute))
     table.add_row("Gemini key", _secret_state(settings.gemini_api_key))
-    table.add_row("Groq key", _secret_state(settings.groq_api_key))
+    table.add_row("Groq key (unused)", _secret_state(settings.groq_api_key))
     console.print(table)
 
     shell_keys = _relevant_shell_keys()
@@ -129,6 +138,11 @@ def show_config() -> None:
     help="Category to include. Can be passed multiple times.",
 )
 @click.option("--output", "-o", default=None, type=click.Path(), help="Output JSONL path")
+@click.option(
+    "--progress-log/--no-progress-log",
+    default=False,
+    help="Print detailed generation events above the compact progress display.",
+)
 def generate(
     seed: int,
     num_conversations: int,
@@ -137,6 +151,7 @@ def generate(
     max_tools: int | None,
     categories: tuple[str, ...],
     output: str | None,
+    progress_log: bool,
 ) -> None:
     """Generate synthetic tool-calling conversations."""
     settings = get_settings()
@@ -153,7 +168,14 @@ def generate(
     if not settings.use_offline_llm:
         console.print(f"  Live profile: {settings.normalized_live_profile}")
     console.print(f"  Generation models: {_format_models(settings.generation_models)}")
+    console.print(f"  Planner models: {_format_models(settings.planner_models)}")
+    console.print(f"  Assistant models: {_format_models(settings.assistant_models)}")
+    console.print(f"  User models: {_format_models(settings.user_models)}")
+    console.print(f"  Summary models: {_format_models(settings.summary_models)}")
     console.print(f"  Judge models: {_format_models(settings.judge_models)}")
+    console.print(f"  Parallel conversations: {settings.normalized_max_parallel_conversations}")
+    console.print(f"  Max turns/conversation: {settings.max_turns_per_conversation}")
+    console.print(f"  LLM max output tokens: {settings.llm_max_output_tokens}")
     if categories:
         console.print(f"  Categories: {', '.join(categories)}")
     console.print()
@@ -173,15 +195,79 @@ def generate(
     output_path = Path(output) if output else None
 
     with _make_progress() as progress:
-        task_id = progress.add_task("Generating chats", total=num_conversations)
+        task_id = progress.add_task("Generating chats | initializing", total=num_conversations)
+        status_task_id = progress.add_task("Run status | waiting", total=None)
+        conversation_tasks: dict[str, int] = {}
+        live_calls = 0
+        latest_event = "starting"
+        completed_count = 0
+        event_count = 0
+        progress_lock = threading.Lock()
 
-        def update_progress(current: int, total: int, label: str) -> None:
+        def refresh_progress() -> None:
             progress.update(
                 task_id,
-                total=total,
-                completed=current,
-                description=f"Generating chats | {label}",
+                description=(
+                    f"Generating chats | done={completed_count}/{num_conversations} "
+                    f"| live_calls={live_calls} | {_short_progress_label(latest_event, 90)}"
+                ),
             )
+            progress.update(
+                status_task_id,
+                description=f"Run status | {_short_progress_label(latest_event, 120)}",
+            )
+
+        def update_progress(current: int, total: int, label: str) -> None:
+            nonlocal completed_count, latest_event
+            with progress_lock:
+                completed_count = current
+                conv_id = _extract_conversation_id(label)
+                if conv_id and conv_id in conversation_tasks:
+                    progress.update(
+                        conversation_tasks[conv_id],
+                        description=f"{conv_id} | done | {_short_progress_label(label, 80)}",
+                        visible=False,
+                    )
+                    del conversation_tasks[conv_id]
+                latest_event = _format_compact_event(event_count, label, live_calls)
+                progress.update(task_id, total=total, completed=current)
+                refresh_progress()
+
+        def update_live_calls(count: int) -> None:
+            nonlocal live_calls
+            with progress_lock:
+                live_calls = count
+                refresh_progress()
+
+        def update_status(label: str) -> None:
+            nonlocal event_count, latest_event
+            with progress_lock:
+                event_count += 1
+                conv_id, stage, detail = _parse_status_label(label)
+                latest_event = _format_compact_event(event_count, label, live_calls)
+                if conv_id and _show_conversation_progress(stage):
+                    task_description = _format_conversation_progress(
+                        conv_id,
+                        event_count,
+                        stage,
+                        detail,
+                    )
+                    task_id_for_conv = conversation_tasks.get(conv_id)
+                    if task_id_for_conv is None:
+                        task_id_for_conv = progress.add_task(task_description, total=None)
+                        conversation_tasks[conv_id] = task_id_for_conv
+                    else:
+                        progress.update(
+                            task_id_for_conv,
+                            description=task_description,
+                            visible=True,
+                        )
+                refresh_progress()
+                if progress_log:
+                    progress.console.log(
+                        f"[cyan]event {event_count:04d}[/cyan] {label} "
+                        f"[dim](live_calls={live_calls})[/dim]"
+                    )
 
         conversations = pipeline.generate(
             num_conversations=num_conversations,
@@ -190,6 +276,8 @@ def generate(
             enable_repair=not no_repair,
             output_path=output_path,
             progress_callback=update_progress,
+            live_call_callback=update_live_calls,
+            status_callback=update_status,
         )
 
     # Summary table
@@ -426,6 +514,90 @@ def _relevant_shell_keys() -> list[str]:
 
 def _shell_key_sort(key: str) -> tuple[int, str]:
     return (1 if any(fragment in key.upper() for fragment in SECRET_KEY_FRAGMENTS) else 0, key)
+
+
+def _parse_status_label(label: str) -> tuple[str | None, str, str]:
+    parts = [part.strip() for part in str(label).split("|")]
+    conv_id = _extract_conversation_id(parts[0]) if parts else None
+    if conv_id:
+        raw_stage = parts[1] if len(parts) > 1 else "status"
+        detail = " | ".join(parts[2:]) if len(parts) > 2 else ""
+    else:
+        raw_stage = parts[0] if parts else "status"
+        detail = " | ".join(parts[1:]) if len(parts) > 1 else ""
+    return conv_id, _normalize_stage(raw_stage, detail), detail
+
+
+def _extract_conversation_id(label: str) -> str | None:
+    match = re.search(r"\bconv_\d{4}\b", str(label))
+    return match.group(0) if match else None
+
+
+def _normalize_stage(stage: str, detail: str = "") -> str:
+    stage_text = stage.strip().lower()
+    detail_text = detail.strip().lower()
+
+    if stage_text.startswith("turn"):
+        if detail_text.startswith("tool call"):
+            return "tool_call"
+        if detail_text.startswith("executing"):
+            return "execute"
+        if detail_text.startswith("result"):
+            return "result"
+        if detail_text.startswith("assistant summary"):
+            return "summary"
+        if detail_text.startswith("assistant text"):
+            return "assistant_text"
+        return "assistant"
+
+    if stage_text.startswith("offline step"):
+        if detail_text.startswith("building args"):
+            return "args"
+        if detail_text.startswith("executing"):
+            return "execute"
+        if detail_text.startswith("result"):
+            return "result"
+        return "offline_step"
+
+    if stage_text == "offline" and detail_text.startswith("planning"):
+        return "planner"
+    if stage_text == "chain ready":
+        return "chain"
+    return stage_text.replace(" ", "_") or "status"
+
+
+def _show_conversation_progress(stage: str) -> bool:
+    return stage not in {"steering", "sampling", "chain", "skipped"}
+
+
+def _format_compact_event(event_count: int, label: str, live_calls: int) -> str:
+    conv_id, stage, detail = _parse_status_label(label)
+    event = f"event={event_count:04d}" if event_count else "event=----"
+    if conv_id:
+        pieces = [event, conv_id, stage]
+    else:
+        pieces = [event, stage]
+    if detail and not conv_id:
+        pieces.append(_short_progress_label(detail, 42))
+    pieces.append(f"live_calls={live_calls}")
+    return " | ".join(pieces)
+
+
+def _format_conversation_progress(
+    conv_id: str,
+    event_count: int,
+    stage: str,
+    detail: str,
+) -> str:
+    suffix = f" | {_short_progress_label(detail, 70)}" if detail else ""
+    return f"{conv_id} | event={event_count:04d} | {stage}{suffix}"
+
+
+def _short_progress_label(label: str, max_chars: int = 150) -> str:
+    normalized = " ".join(str(label).split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 1].rstrip() + "…"
 
 
 def _make_progress() -> Progress:

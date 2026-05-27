@@ -89,6 +89,10 @@ def structural_repair(conversation: Conversation) -> Conversation:
     conversation.metadata.num_distinct_tools = len(
         {endpoint.split("/")[0] for endpoint in conversation.metadata.tools_used}
     )
+    valid_tools = set(conversation.metadata.tools_used)
+    conversation.step_trace = [
+        step for step in conversation.step_trace if step.endpoint in valid_tools
+    ]
     return conversation
 
 
@@ -105,6 +109,7 @@ def repair_conversation(
     steering: SteeringGuidance | None = None,
     strict_live: bool = False,
     live_profile: str = "full",
+    role_clients: dict[str, LLMClient] | None = None,
 ) -> tuple[Conversation, int]:
     """Attempt to repair a conversation that failed quality checks.
 
@@ -162,6 +167,7 @@ def repair_conversation(
                 model_name=conversation.metadata.model,
                 strict_live=strict_live,
                 live_profile=live_profile,
+                role_clients=role_clients,
             )
 
         new_scores = score_conversation(judge_client, new_conversation, strict_live=strict_live)
