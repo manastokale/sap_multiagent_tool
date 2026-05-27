@@ -21,7 +21,9 @@ venv/
 .toolbench_clone/
 
 # Output (generated)
-output/
+output/*jsonl
+output/*/*jsonl
+output/*/*json
 
 # Frontend dashboard
 dashboard/node_modules/
