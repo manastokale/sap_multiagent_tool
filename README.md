@@ -2,8 +2,7 @@
 
 Synthetic multi-tool conversations for training and evaluating agentic LLMs.
 
-ToolGen was built for the SAP Foundation Model offline assessment in
-`KG_MLE_SAP_OA.pdf`. Think of it as a flight simulator for tool-using agents: it does
+Think of it as a flight simulator for tool-using agents: it does
 not call real APIs, but it creates realistic practice missions where the assistant must
 choose tools, pass grounded arguments, use earlier tool outputs, and get scored.
 
